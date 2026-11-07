@@ -1,0 +1,17 @@
+{
+  "name": "@utc/shared",
+  "version": "0.1.0",
+  "private": true,
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "vitest": "^5.1.0",
+    "typescript": "^5",
+    "@types/node": "^20"
+  }
+}

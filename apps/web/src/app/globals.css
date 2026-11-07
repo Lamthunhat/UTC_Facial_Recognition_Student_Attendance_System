@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+/* Token màu theo quy ước shadcn/ui; màu ô điểm danh dùng cho bảng (FR-062). */
+:root {
+  --background: #ffffff;
+  --foreground: #0f172a;
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+  --primary: #1d4ed8;
+  --primary-foreground: #ffffff;
+  --border: #e2e8f0;
+  --destructive: #dc2626;
+  --radius: 0.5rem;
+
+  --cell-valid: #16a34a;
+  --cell-excused: #2563eb;
+  --cell-invalid: #dc2626;
+  --cell-suspect: #eab308;
+  --cell-pending: #cbd5e1;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-cell-valid: var(--cell-valid);
+  --color-cell-excused: var(--cell-excused);
+  --color-cell-invalid: var(--cell-invalid);
+  --color-cell-suspect: var(--cell-suspect);
+  --color-cell-pending: var(--cell-pending);
+  --radius-lg: var(--radius);
+  --font-sans: var(--font-be-vietnam-pro), system-ui, sans-serif;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}

@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ai-filter-spec.schema.json",
+  "title": "FilterSpec",
+  "description": "Bộ lọc có cấu trúc do giao diện lọc hoặc trợ lý AI sinh ra. Server luôn thêm điều kiện lớp thuộc giảng viên đang đăng nhập; không có thao tác ghi.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["scope", "output"],
+  "properties": {
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "classIds": { "type": "array", "items": { "type": "string", "format": "uuid" }, "description": "Rỗng = mọi lớp của giảng viên" },
+        "sessions": {
+          "oneOf": [
+            { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "latest" } } },
+            { "type": "object", "additionalProperties": false, "required": ["kind", "ids"], "properties": { "kind": { "const": "ids" }, "ids": { "type": "array", "items": { "type": "string", "format": "uuid" } } } },
+            { "type": "object", "additionalProperties": false, "required": ["kind", "from", "to"], "properties": { "kind": { "const": "dateRange" }, "from": { "type": "string", "format": "date" }, "to": { "type": "string", "format": "date" } } },
+            { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "all" } } }
+          ]
+        }
+      }
+    },
+    "where": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "search": { "type": "string", "maxLength": 100, "description": "Mã SV / họ / tên / họ và tên, không phân biệt dấu" },
+        "adminClasses": { "type": "array", "items": { "type": "string" } },
+        "cohorts": { "type": "array", "items": { "type": "string", "pattern": "^K[0-9]{2}$" } },
+        "sessionStatus": { "type": "array", "items": { "enum": ["present", "left_early", "absent", "excused", "suspect"] } },
+        "checkinLateMinutes": { "type": "object", "additionalProperties": false, "properties": { "gt": { "type": "number", "minimum": 0 }, "lte": { "type": "number", "minimum": 0 } } },
+        "checkinResult": { "type": "array", "items": { "enum": ["valid", "suspect", "rejected", "none"] } },
+        "checkoutResult": { "type": "array", "items": { "enum": ["valid", "suspect", "rejected", "none"] } }
+      }
+    },
+    "aggregate": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Tổng hợp theo sinh viên trên các buổi trong scope",
+      "required": ["metric"],
+      "properties": {
+        "metric": { "enum": ["count_present", "count_absent", "count_excused", "count_left_early", "count_suspect", "attendance_rate"] },
+        "having": { "type": "object", "additionalProperties": false, "properties": { "gt": { "type": "number" }, "gte": { "type": "number" }, "lt": { "type": "number" }, "lte": { "type": "number" } } }
+      }
+    },
+    "orderBy": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field"],
+        "properties": {
+          "field": { "enum": ["checkin_time", "checkout_time", "late_minutes", "student_code", "last_name", "first_name", "admin_class", "cohort", "metric"] },
+          "direction": { "enum": ["asc", "desc"], "default": "asc" }
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["rows", "count"] },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 500, "default": 200 }
+      }
+    }
+  },
+  "examples": [
+    {
+      "scope": { "sessions": { "kind": "latest" } },
+      "where": { "checkinLateMinutes": { "gt": 10 } },
+      "orderBy": [{ "field": "late_minutes", "direction": "desc" }],
+      "output": { "mode": "rows" }
+    },
+    {
+      "scope": { "sessions": { "kind": "all" } },
+      "aggregate": { "metric": "count_absent", "having": { "gt": 3 } },
+      "orderBy": [{ "field": "metric", "direction": "desc" }],
+      "output": { "mode": "rows" }
+    }
+  ]
+}

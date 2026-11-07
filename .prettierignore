@@ -1,0 +1,7 @@
+node_modules
+.next
+pnpm-lock.yaml
+models
+.specify
+specs
+_claude

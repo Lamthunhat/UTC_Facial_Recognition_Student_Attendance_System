@@ -1,0 +1,36 @@
+{
+  "name": "@utc/database",
+  "version": "0.1.0",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema.ts",
+    "./client": "./src/client.ts",
+    "./seed/periods": "./src/seed/periods.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:seed:demo": "tsx scripts/seed-demo.ts"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.15",
+    "@electric-sql/pglite-pgvector": "^0.0.16",
+    "@utc/shared": "workspace:*",
+    "drizzle-orm": "^0.45.4",
+    "postgres": "^4.1.0",
+    "server-only": "^0.0.1"
+  },
+  "devDependencies": {
+    "@node-rs/argon2": "^2.2.2",
+    "@types/node": "^20",
+    "dotenv": "^18.0.9",
+    "drizzle-kit": "^0.31.11",
+    "tsx": "^4.23.15",
+    "typescript": "^5",
+    "vitest": "^5.1.0"
+  }
+}

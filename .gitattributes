@@ -1,0 +1,12 @@
+# Giữ LF trong repo và thư mục làm việc (tránh core.autocrlf đổi file trên Windows)
+* text=auto eol=lf
+
+# Fixture test: byte là dữ liệu (CSV Windows-1258/CRLF, xlsx) — không được chuyển đổi dòng
+packages/backend/tests/fixtures/*.csv binary
+*.xlsx binary
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary
+*.ttf binary
+*.onnx binary

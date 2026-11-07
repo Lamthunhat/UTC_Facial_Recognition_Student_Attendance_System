@@ -1,0 +1,42 @@
+{
+  "name": "@utc/backend",
+  "version": "0.1.0",
+  "private": true,
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "typecheck": "tsc --noEmit",
+    "spike:face": "tsx --conditions=react-server scripts/spike-face.ts",
+    "spike:card": "tsx scripts/spike-card.ts",
+    "admin:create": "tsx --conditions=react-server scripts/create-admin.ts"
+  },
+  "dependencies": {
+    "@node-rs/argon2": "^2.2.2",
+    "@utc/database": "workspace:*",
+    "@utc/shared": "workspace:*",
+    "drizzle-orm": "^0.45.4",
+    "exceljs": "^4.4.0",
+    "file-type": "^22.3.0",
+    "iconv-lite": "^0.7.3",
+    "jose": "^6.2.15",
+    "onnxruntime-node": "^1.31.1",
+    "papaparse": "^5.7.0",
+    "server-only": "^0.0.1",
+    "sharp": "^0.35.5",
+    "zod": "^4.6.7",
+    "zxing-wasm": "^3.1.6"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/papaparse": "^5.5.2",
+    "@vitest/coverage-v8": "^5.1.0",
+    "dotenv": "^18.0.9",
+    "tsx": "^4.23.15",
+    "typescript": "^5",
+    "vitest": "^5.1.0"
+  }
+}

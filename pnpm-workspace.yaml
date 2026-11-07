@@ -1,0 +1,14 @@
+# Monorepo: apps/* (ứng dụng chạy được) và packages/* (thư viện nội bộ).
+packages:
+  - apps/*
+  - packages/*
+
+# pnpm 10: gói nào được chạy script cài đặt.
+onlyBuiltDependencies:
+  - "@node-rs/argon2"
+  - esbuild
+  - sharp
+  - unrs-resolver
+# onnxruntime-node: script chỉ tải thêm binary CUDA (GPU) — dự án chạy CPU nên bỏ qua.
+ignoredBuiltDependencies:
+  - onnxruntime-node
