@@ -2,6 +2,8 @@ import { useTestAppDb } from "@utc/database/testing";
 import { vnDateOf } from "@utc/shared/periods";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { POST as studentLogin } from "../../src/api/auth/student-login";
+import { POST as cardNonce } from "../../src/api/student/card-nonce";
+import { CONSENT_VERSION } from "@utc/shared/consent";
 import { getSession, revokeSession } from "../../src/auth/session";
 import { NO_PARAMS } from "../../src/http/handler";
 import { readJson } from "../support/http";
@@ -15,6 +17,7 @@ const FAIL_MSG = "Không đăng nhập được. Kiểm tra lại mã sinh viên
 
 let ctx: Awaited<ReturnType<typeof useTestAppDb>>;
 let activeStudentId = "";
+let runningClassId = "";
 
 const login = (studentCode: unknown, ip = "10.0.0.1") =>
   studentLogin(
@@ -39,6 +42,7 @@ beforeAll(async () => {
     (await q<{ id: string }>(`insert into students (student_code,last_name,first_name) values ($1,$2,$3) returning id`, [code, last, first]))[0].id;
 
   const running = await mkClass("DANG-HOC", daysFromToday(-30), daysFromToday(30));
+  runningClassId = running;
   const ended = await mkClass("DA-KET-THUC", daysFromToday(-120), daysFromToday(-20));
   const upcoming = await mkClass("SAP-HOC", daysFromToday(5), daysFromToday(90));
 
@@ -130,16 +134,47 @@ describe("POST /api/auth/student/login", () => {
     expect(JSON.stringify(rows[0].meta)).not.toContain("231239999");
   });
 
-  it("rate limit theo IP: 10 lần/5 phút, lần 11 → 429 + Retry-After + security_events rate_limited", async () => {
+  it("rate limit theo IP chỉ đếm lượt THẤT BẠI: 20 lần/5 phút; sau đó MỌI lượt từ IP đó bị chặn (kể cả mã đúng — không để lộ mã đúng qua 200/429)", async () => {
     const ip = "10.9.9.9";
-    for (let i = 0; i < 10; i++) expect((await login(`2312400${String(i).padStart(2, "0")}`, ip)).status).toBe(401);
-    const res = await login("231230801", ip); // kể cả mã đúng
+    for (let i = 0; i < 20; i++) expect((await login(`2312400${String(i).padStart(2, "0")}`, ip)).status, `lần ${i + 1}`).toBe(401);
+    const res = await login("231230801", ip);
     expect(res.status).toBe(429);
     expect(res.headers.get("Retry-After")).toBeTruthy();
     await new Promise((r) => setTimeout(r, 50)); // ghi sự kiện không chặn phản hồi
     const n = (await ctx.pg.query<{ n: number }>(`select count(*)::int as n from security_events where type='rate_limited' and ip=$1`, [ip])).rows[0].n;
     expect(n).toBeGreaterThanOrEqual(1);
   });
+
+  it("cả lớp sau một IP (Wi-Fi trường): 40 SV khác nhau cùng IP đều đăng nhập và lấy nonce thẻ được", async () => {
+    const ip = "203.0.113.7";
+    for (let i = 0; i < 40; i++) {
+      const code = `2312501${String(i).padStart(2, "0")}`;
+      const [s] = (await ctx.pg.query<{ id: string }>(
+        `insert into students (student_code,last_name,first_name,consent_at,consent_version) values ($1,'Lớp','SV',now(),$2) returning id`,
+        [code, CONSENT_VERSION],
+      )).rows;
+      await ctx.pg.query(`insert into enrollments (class_id, student_id) values ($1,$2)`, [runningClassId, s.id]);
+    }
+    for (let i = 0; i < 40; i++) {
+      const res = await login(`2312501${String(i).padStart(2, "0")}`, ip);
+      expect(res.status, `SV thứ ${i + 1} đăng nhập`).toBe(200);
+      const cookie = res.headers.get("set-cookie")!.split(";")[0];
+      const n = await cardNonce(
+        new Request(`${O}/api/student/card/nonce`, { method: "POST", headers: { origin: O, cookie, "x-real-ip": ip } }),
+        NO_PARAMS,
+      );
+      expect(n.status, `SV thứ ${i + 1} lấy nonce`).toBe(200);
+    }
+  });
+
+  it("trần tổng theo IP 300 lượt/5 phút (kể cả lượt đúng) → lượt 301 bị 429", async () => {
+    const ip = "198.51.100.9";
+    for (let i = 0; i < 300; i++) {
+      const res = await login(`2312501${String(i % 40).padStart(2, "0")}`, ip);
+      if (res.status !== 200) throw new Error(`lượt ${i + 1}: ${res.status}`);
+    }
+    expect((await login("231250100", ip)).status).toBe(429);
+  }, 120_000);
 
   it("giới hạn theo mã KHÔNG khoá SV thật: 20 lần đăng nhập mã A từ 20 IP khác vẫn không chặn A từ IP của A", async () => {
     for (let i = 0; i < 20; i++) expect((await login("231230801", `172.16.0.${i}`)).status, `lần ${i + 1}`).toBe(200);

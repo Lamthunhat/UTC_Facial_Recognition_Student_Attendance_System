@@ -372,10 +372,30 @@ describe("POST /api/student/card — đăng ký thẻ", () => {
     expect(card.name_matched).toBe(false);
   });
 
-  it("rate limit 3 lần/giờ/SV → lần 4 trả 429", async () => {
+  it("6 lượt/giờ/SV; mỗi lỗi kèm remainingAttempts giảm dần; lượt 7 → 429 với remainingAttempts 0 + Retry-After", async () => {
     scenario("231239999", 9); // thẻ người khác → 422, mỗi lần vẫn tính lượt
-    for (let i = 0; i < 3; i++) expect((await submit("O")).status).toBe(422);
-    expect((await submit("O")).status).toBe(429);
+    const remaining: number[] = [];
+    const freshNonceQuota = () => q(`delete from rate_limits where key like 'card-nonce:%'`); // giữ nguyên bộ đếm lượt đăng ký
+    for (let i = 0; i < 6; i++) {
+      await freshNonceQuota();
+      const res = await submit("O");
+      expect(res.status, `lượt ${i + 1}`).toBe(422);
+      const { error } = await readJson(res);
+      expect(error.code).toBe("CODE_MISMATCH");
+      remaining.push(error.remainingAttempts);
+    }
+    expect(remaining).toEqual([5, 4, 3, 2, 1, 0]);
+    await freshNonceQuota();
+    const blocked = await submit("O");
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get("Retry-After")).toBeTruthy();
+    expect((await readJson(blocked)).error).toMatchObject({ code: "RATE_LIMITED", remainingAttempts: 0 });
+  });
+
+  it("lỗi trước khi tính lượt (nonce sai) không tiêu lượt và không có remainingAttempts", async () => {
+    const res = await submit("O", "00000000-0000-4000-8000-000000000000");
+    expect(res.status).toBe(403);
+    expect((await readJson(res)).error.remainingAttempts).toBeUndefined();
   });
 });
 

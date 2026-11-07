@@ -9,10 +9,10 @@ import type { SessionClaims } from "../auth/jwt";
 import { removeObjects, signedUrl, uploadObject, type Bucket } from "../evidence/storage";
 import { checkLiveFrames, isChallenge, LIVENESS_RULES, samePerson, type Challenge, type LiveFrameError } from "../face/liveness";
 import { cosine } from "../face/similarity";
-import { HttpError } from "../http/errors";
+import { HttpError, tooManyRequests } from "../http/errors";
 import { log } from "../log";
 import { consumeNonce, issueNonce } from "../security/nonce";
-import { enforce, RULES } from "../security/rate-limit";
+import { enforce, hit, RULES } from "../security/rate-limit";
 import { sanitizeImage, UploadError } from "../security/upload";
 import { requireConsent } from "../student/consent";
 import { decodeCard } from "./decode";
@@ -135,7 +135,24 @@ export async function registerCard(
   await assertCanRegisterCard(studentId);
   const { challenge } = await consumeNonce({ nonce: input.nonce, studentId, purpose: "card", ip });
   if (!isChallenge(challenge)) throw new HttpError(403, "BAD_NONCE", "Phiên chụp không hợp lệ. Vui lòng chụp lại.");
-  await enforce(`card:${studentId}`, RULES.cardRegister);
+  // Tính lượt (6/giờ/SV) — chỉ lượt đã qua nonce hợp lệ. Lỗi từ đây trở đi kèm remainingAttempts để UI báo số lượt còn lại.
+  const attempt = await hit(`card:${studentId}`, RULES.cardRegister);
+  const remainingAttempts = Math.max(0, RULES.cardRegister.limit - attempt.count);
+  if (!attempt.allowed) throw tooManyRequests(attempt.retryAfterSec, { remainingAttempts: 0 });
+  try {
+    return await processCard(session, studentId, input, challenge);
+  } catch (e) {
+    if (e instanceof HttpError && e.status < 500) throw e.withExtra({ remainingAttempts });
+    throw e;
+  }
+}
+
+async function processCard(
+  session: SessionClaims,
+  studentId: string,
+  input: { nonce: string; image: Buffer; frames: Buffer[] },
+  challenge: Challenge,
+): Promise<{ status: "active" | "pending_review"; decodedCode: string }> {
   if (input.frames.length !== LIVE_FRAME_COUNT) {
     throw new HttpError(422, "VALIDATION_ERROR", "Cần đúng 3 khung hình khuôn mặt theo hướng dẫn.");
   }

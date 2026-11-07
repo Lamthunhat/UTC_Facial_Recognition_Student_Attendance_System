@@ -57,10 +57,12 @@ Rồi chạy lại `pnpm dev` và đăng nhập tại `/login`.
 | `pnpm db:seed:demo` | Dữ liệu demo (cần `SEED_ADMIN_PASSWORD`, `SEED_INSTRUCTOR_PASSWORD`) |
 | `pnpm --filter @utc/backend spike:face <ảnh>` | Đo tốc độ nhận diện khuôn mặt |
 | `pnpm --filter @utc/backend spike:card <ảnh thẻ>` | Thử đọc mã vạch thẻ sinh viên |
+| `pnpm --filter @utc/backend calibrate:card <thư mục ảnh>` | Đo đọc thẻ trên ảnh thẻ thật (cục bộ, không lưu/gửi ảnh) — xác nhận R3, hiệu chỉnh ngưỡng chân dung |
+| `pnpm check:traces` | Sau `pnpm build`: kiểm function đọc thẻ có đủ wasm + dữ liệu OCR + model trong bản đóng gói |
 
 ## Lưu ý
 
-- Model InsightFace (buffalo_s) chỉ dùng cho mục đích phi thương mại / nghiên cứu.
+- **Giấy phép model khuôn mặt**: trọng số InsightFace `buffalo_s` (SCRFD-500M + MobileFaceNet) chỉ được dùng cho **mục đích phi thương mại / nghiên cứu học thuật** — phù hợp đồ án, KHÔNG dùng cho sản phẩm thương mại hay dịch vụ thu phí (khi đó phải thay model có giấy phép thương mại và hiệu chỉnh lại ngưỡng). Repo không phân phối lại model: tải bằng `pnpm models:download` (kiểm SHA-256). Chi tiết: `specs/001-attendance-core/research.md` R1.
 - Không commit ảnh khuôn mặt, ảnh thẻ, file `.env*` hay thư mục `models/`.
 - Font Be Vietnam Pro theo giấy phép SIL OFL 1.1 (`apps/web/public/fonts/OFL.txt`).
 - Deploy Vercel: Root Directory = `apps/web`.

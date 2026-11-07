@@ -13,13 +13,22 @@ export interface RateLimitRule {
   windowSec: number;
 }
 
-/** Ngưỡng theo research.md R14. */
+/**
+ * Ngưỡng theo research.md R14.
+ * Nguyên tắc khoá: API CHƯA đăng nhập (đăng nhập SV/GV) mới khoá theo IP; mọi API ĐÃ đăng nhập (nonce, đăng ký thẻ,
+ * check-in, nhập danh sách…) khoá theo id người dùng (session.sub) — cả lớp đứng sau một IP Wi-Fi trường (NAT)
+ * không được làm nhau bị chặn.
+ */
 export const RULES = {
-  studentLoginIp: { limit: 10, windowSec: 300 },
+  /** Đăng nhập SV theo IP: chỉ đếm lượt THẤT BẠI (chống dò mã); vượt thì chặn mọi lượt từ IP đó. */
+  studentLoginIpFail: { limit: 20, windowSec: 300 },
+  /** Trần tổng mọi lượt đăng nhập SV theo IP (đủ cho vài lớp sau một NAT, chặn lạm dụng). */
+  studentLoginIpTotal: { limit: 300, windowSec: 300 },
+  /** Đăng nhập SV theo mã: chỉ đếm lượt THẤT BẠI — người khác không thể khoá hộ mã của SV thật. */
   studentLoginCode: { limit: 5, windowSec: 300 },
   staffLoginIp: { limit: 20, windowSec: 300 },
   scanNonce: { limit: 6, windowSec: 60 },
-  cardRegister: { limit: 3, windowSec: 3600 },
+  cardRegister: { limit: 6, windowSec: 3600 },
   leaveExtract: { limit: 10, windowSec: 3600 },
   assistant: { limit: 20, windowSec: 3600 },
   export: { limit: 30, windowSec: 3600 },
@@ -58,6 +67,22 @@ export async function hit(key: string, rule: RateLimitRule): Promise<RateLimitRe
 export async function enforce(key: string, rule: RateLimitRule): Promise<void> {
   const r = await hit(key, rule);
   if (!r.allowed) throw tooManyRequests(r.retryAfterSec);
+}
+
+/**
+ * Ném 429 nếu bộ đếm ĐÃ đạt ngưỡng trong cửa sổ hiện tại — KHÔNG tăng bộ đếm. Dùng cho giới hạn chỉ đếm lượt thất bại:
+ * kiểm trước khi xử lý (chặn cả lượt sẽ thành công), còn bộ đếm chỉ tăng bằng hit() khi thất bại.
+ */
+export async function assertNotLimited(key: string, rule: RateLimitRule): Promise<void> {
+  const db = await getDb();
+  const res = await db.execute<{ count: number; window_start: string | Date }>(sql`
+    select count, window_start from rate_limits
+    where key = ${key} and window_start > now() - ${`${rule.windowSec} seconds`}::interval`);
+  const rows = (Array.isArray(res) ? res : (res as { rows: unknown[] }).rows) as { count: number; window_start: string | Date }[];
+  if (rows[0] && Number(rows[0].count) >= rule.limit) {
+    const started = new Date(rows[0].window_start).getTime();
+    throw tooManyRequests(Math.max(1, Math.ceil((started + rule.windowSec * 1000 - Date.now()) / 1000)));
+  }
 }
 
 /** Xoá bộ đếm (ví dụ sau khi đăng nhập thành công). */
