@@ -12,3 +12,9 @@ onlyBuiltDependencies:
 # onnxruntime-node: script chỉ tải thêm binary CUDA (GPU) — dự án chạy CPU nên bỏ qua.
 ignoredBuiltDependencies:
   - onnxruntime-node
+
+# Vá bảo mật bắc cầu (FR-096, `pnpm audit --audit-level high` trong CI):
+# next 15.5.x khoá cứng postcss 8.4.31 (GHSA-6g55-p6wh-862q, GHSA-r28c-9q8g-f849 — high).
+# Bỏ khi next phát hành bản dùng postcss ≥ 8.5.23.
+overrides:
+  "postcss@<8.5.23": "^8.5.23"
