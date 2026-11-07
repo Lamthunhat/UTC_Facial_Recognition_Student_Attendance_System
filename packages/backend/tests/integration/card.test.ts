@@ -56,11 +56,24 @@ function faceVector(seed: number, noise = 0): number[] {
 }
 
 // ---------- bản giả cho decode/face/storage ----------
+const goodFaceBase: PortraitFace = { score: 0.95, box: { x1: 40, y1: 150, x2: 280, y2: 450 }, sharpness: 0.6 };
 const uploads: { bucket: string; path: string; body: Buffer; contentType: string }[] = [];
 const removed: { bucket: string; paths: string[] }[] = [];
 let nextDecode: Awaited<ReturnType<CardDeps["decode"]>>;
 let nextFaces: PortraitFace[];
 let nextEmbedding: number[];
+// Khung hình trực tiếp: "follow" = làm đúng thử thách của nonce vừa cấp; "reverse" = quay ngược; "static" = ảnh tĩnh nhìn thẳng
+let liveMode: "follow" | "reverse" | "static" = "follow";
+let liveEmbedding: number[] | null = null; // null = cùng khuôn mặt với chân dung thẻ
+let lastChallenge: ["left" | "right", "left" | "right"] = ["left", "right"];
+let liveFrameNo = 0;
+
+/** 5 điểm mốc cho một tư thế (ảnh không lật: quay trái của SV → mũi lệch phải ảnh). */
+const kpsFor = (pose: "left" | "right" | "center"): [number, number][] => {
+  const off = pose === "left" ? 0.3 : pose === "right" ? -0.3 : 0;
+  return [[100, 100], [160, 100], [130 + off * 60, 130], [108, 160], [152, 160]];
+};
+const liveFace = (pose: "left" | "right" | "center"): PortraitFace => ({ ...goodFaceBase, kps: kpsFor(pose) });
 
 const fakeDeps: CardDeps = {
   decode: async () => nextDecode,
@@ -69,6 +82,13 @@ const fakeDeps: CardDeps = {
     embed: async () => nextEmbedding,
     crop: async () => sharp({ create: { width: 120, height: 150, channels: 3, background: "#ccc" } }).jpeg().toBuffer(),
   }),
+  analyzeLive: async () => {
+    const i = liveFrameNo++ % 3;
+    const [a, b] = lastChallenge;
+    const seq: ("left" | "right" | "center")[] =
+      liveMode === "static" ? ["center", "center", "center"] : liveMode === "reverse" ? [b, "center", a] : [a, "center", b];
+    return { faces: [liveFace(seq[i])], embed: async () => liveEmbedding ?? nextEmbedding, crop: async () => Buffer.alloc(0) };
+  },
   storage: {
     upload: async (bucket, path, body, contentType) => {
       uploads.push({ bucket, path, body, contentType });
@@ -80,11 +100,13 @@ const fakeDeps: CardDeps = {
     signedUrl: async (bucket, path) => `https://storage.test/${bucket}/${path}?token=t`,
   },
 };
-const goodFace: PortraitFace = { score: 0.95, box: { x1: 40, y1: 150, x2: 280, y2: 450 }, sharpness: 0.6 };
+const goodFace: PortraitFace = goodFaceBase;
 const scenario = (code: string, seed: number, over: Partial<{ method: "barcode" | "ocr"; text: string; faces: PortraitFace[] }> = {}) => {
   nextDecode = { decoded: { code, method: over.method ?? "barcode" }, text: over.text ?? "" };
   nextFaces = over.faces ?? [goodFace];
   nextEmbedding = faceVector(seed);
+  liveMode = "follow";
+  liveEmbedding = null;
 };
 
 // ---------- request helpers ----------
@@ -102,11 +124,11 @@ async function photo(opts: { exif?: boolean; size?: number } = {}) {
   return img.jpeg({ quality: 90 }).toBuffer();
 }
 
-async function multipart(c: string, fields: Record<string, string | Buffer>, extra: Record<string, string> = {}) {
+async function multipart(c: string, fields: Record<string, string | Buffer | Buffer[]>, extra: Record<string, string> = {}) {
   const fd = new FormData();
   for (const [k, v] of Object.entries(fields)) {
     if (typeof v === "string") fd.append(k, v);
-    else fd.append(k, new Blob([new Uint8Array(v)], { type: "image/jpeg" }), "the.jpg");
+    else for (const b of Array.isArray(v) ? v : [v]) fd.append(k, new Blob([new Uint8Array(b)], { type: "image/jpeg" }), "anh.jpg");
   }
   const tmp = new Request(`${O}/api/student/card`, { method: "POST", body: fd });
   const body = Buffer.from(await tmp.arrayBuffer());
@@ -121,14 +143,19 @@ const consent = (who: string) => giveConsent(json("/api/student/consent", cookie
 async function nonceFor(who: string): Promise<string> {
   const res = await cardNonce(json("/api/student/card/nonce", cookie[who]), NO_PARAMS);
   expect(res.status, `nonce cho ${who}`).toBe(200);
-  return (await readJson(res)).nonce;
+  const body = await readJson(res);
+  lastChallenge = body.challenge;
+  return body.nonce;
 }
-async function submit(who: string, nonce?: string, image?: Buffer) {
-  return uploadCard(await multipart(cookie[who], { nonce: nonce ?? (await nonceFor(who)), image: image ?? (await photo()) }), NO_PARAMS);
+let selfies: Buffer[] = [];
+async function submit(who: string, nonce?: string, image?: Buffer, frames?: Buffer[]) {
+  liveFrameNo = 0;
+  const n = nonce ?? (await nonceFor(who));
+  return uploadCard(await multipart(cookie[who], { nonce: n, image: image ?? (await photo()), frames: frames ?? selfies }), NO_PARAMS);
 }
 const liveCard = async (who: string) =>
-  (await q<{ id: string; status: string; review_reasons: string[]; duplicate_student_id: string | null; duplicate_similarity: number | null; purge_after: Date; dims: number; decode_method: string; name_matched: boolean | null }>(
-    `select id, status, review_reasons, duplicate_student_id, duplicate_similarity, purge_after, vector_dims(embedding) as dims, decode_method, name_matched
+  (await q<{ id: string; status: string; review_reasons: string[]; duplicate_student_id: string | null; duplicate_similarity: number | null; purge_after: Date; dims: number; decode_method: string; name_matched: boolean | null; live_similarity: number | null }>(
+    `select id, status, review_reasons, duplicate_student_id, duplicate_similarity, purge_after, vector_dims(embedding) as dims, decode_method, name_matched, live_similarity
      from student_cards where student_id = $1 and status in ('active','pending_review')`,
     [ids[who]],
   ))[0];
@@ -137,6 +164,9 @@ beforeAll(async () => {
   process.env.JWT_SECRET = "integration-secret-integration-secret-xx";
   ctx = await useTestAppDb();
   setCardDepsForTest(fakeDeps);
+  selfies = await Promise.all(
+    [0, 1, 2].map((i) => sharp({ create: { width: 640, height: 480, channels: 3, background: { r: 120 + i, g: 110, b: 100 } } }).jpeg().toBuffer()),
+  );
   const user = async (key: string, role: string) => {
     ids[key] = (await q<{ id: string }>(`insert into users (email,password_hash,full_name,role) values ($1,'x',$1,$2) returning id`, [`${key}@x`, role]))[0].id;
     cookie[key] = `${SESSION_COOKIE}=${(await createSession(ids[key], role as "admin" | "instructor")).token}`;
@@ -162,6 +192,8 @@ beforeAll(async () => {
   await sv("H", "231230808", "Bùi Thanh", "Hương", ["K1"]);
   await sv("O", "231230809", "Ngô Thị", "Linh", ["K1"]);
   await sv("N", "231230810", "Đỗ Hữu", "Khánh", []); // không thuộc lớp nào
+  await sv("L", "231230811", "Lê Văn", "Lâm", ["K1"]); // ca liveness
+  await sv("P", "231230812", "Phan Thị", "Phương", ["K1"]); // ca thẻ bị từ chối không lưu gì
   for (const [who, seed] of [["B", 2], ["D", 4]] as const) {
     await q(
       `insert into student_cards (student_id, embedding, decoded_code, decode_method, status) values ($1, $2::vector, $3, 'barcode', 'active')`,
@@ -255,11 +287,11 @@ describe("POST /api/student/card — đăng ký thẻ", () => {
   it("ảnh > 1 MB → 413; không phải ảnh → 422 UNSUPPORTED_TYPE", async () => {
     scenario("231230801", 1);
     const big = await uploadCard(
-      await multipart(cookie.A, { nonce: await nonceFor("A"), image: Buffer.alloc(1_100_000, 7) }),
+      await multipart(cookie.A, { nonce: await nonceFor("A"), image: Buffer.alloc(1_100_000, 7), frames: selfies }),
       NO_PARAMS,
     );
     expect(big.status).toBe(413);
-    const text = await uploadCard(await multipart(cookie.A, { nonce: await nonceFor("A"), image: Buffer.from("day khong phai la anh, chi la chu thoi") }), NO_PARAMS);
+    const text = await uploadCard(await multipart(cookie.A, { nonce: await nonceFor("A"), image: Buffer.from("day khong phai la anh, chi la chu thoi"), frames: selfies }), NO_PARAMS);
     expect(text.status).toBe(422);
     expect((await readJson(text)).error.code).toBe("UNSUPPORTED_TYPE");
   });
@@ -344,6 +376,108 @@ describe("POST /api/student/card — đăng ký thẻ", () => {
     scenario("231239999", 9); // thẻ người khác → 422, mỗi lần vẫn tính lượt
     for (let i = 0; i < 3; i++) expect((await submit("O")).status).toBe(422);
     expect((await submit("O")).status).toBe(429);
+  });
+});
+
+describe("ảnh khuôn mặt trực tiếp + thử thách quay đầu khi đăng ký thẻ (FR-045a)", () => {
+  beforeAll(async () => {
+    for (const who of ["L", "P"]) await consent(who);
+  });
+  const countCards = async (who: string) => (await q<{ n: number }>(`select count(*)::int as n from student_cards where student_id=$1`, [ids[who]]))[0].n;
+
+  it("nonce thẻ kèm thử thách ngẫu nhiên: hoán vị của left/right", async () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < 12; i++) {
+      const res = await cardNonce(json("/api/student/card/nonce", cookie.L), NO_PARAMS);
+      const { challenge } = await readJson(res);
+      expect([...challenge].sort()).toEqual(["left", "right"]);
+      seen.add(challenge.join(","));
+      await q(`delete from rate_limits`);
+    }
+    expect(seen.size).toBe(2); // cả hai thứ tự đều xuất hiện (xác suất trượt 2^-11)
+  });
+
+  it("thiếu khung hình / không đủ 3 khung → 422", async () => {
+    scenario("231230811", 21);
+    const none = await uploadCard(await multipart(cookie.L, { nonce: await nonceFor("L"), image: await photo() }), NO_PARAMS);
+    expect(none.status).toBe(422);
+    const two = await uploadCard(await multipart(cookie.L, { nonce: await nonceFor("L"), image: await photo(), frames: selfies.slice(0, 2) }), NO_PARAMS);
+    expect(two.status).toBe(422);
+  });
+
+  it("tổng request > 4 MB → 413 trước khi đọc body", async () => {
+    const req = await multipart(cookie.L, { nonce: await nonceFor("L"), image: await photo(), frames: selfies }, { "content-length": String(4 * 1024 * 1024 + 1) });
+    expect((await uploadCard(req, NO_PARAMS)).status).toBe(413);
+  });
+
+  it("quay ngược thử thách → 422 LIVENESS_FAILED; ảnh tĩnh → 422 LIVENESS_FAILED; không lưu gì", async () => {
+    scenario("231230811", 21);
+    liveMode = "reverse";
+    const r1 = await submit("L");
+    expect(r1.status).toBe(422);
+    expect((await readJson(r1)).error.code).toBe("LIVENESS_FAILED");
+    await q(`delete from rate_limits`);
+    scenario("231230811", 21);
+    liveMode = "static";
+    expect((await readJson(await submit("L"))).error.code).toBe("LIVENESS_FAILED");
+    expect(uploads).toHaveLength(0);
+    expect(await countCards("L")).toBe(0);
+  });
+
+  it("3 khung không cùng một người → 422 LIVENESS_FAILED", async () => {
+    scenario("231230811", 21);
+    let n = 0;
+    const realLive = fakeDeps.analyzeLive;
+    fakeDeps.analyzeLive = async (img) => {
+      const r = await realLive(img);
+      const k = n++;
+      return { ...r, embed: async () => (k === 2 ? faceVector(99) : nextEmbedding) };
+    };
+    try {
+      expect((await readJson(await submit("L"))).error.code).toBe("LIVENESS_FAILED");
+    } finally {
+      fakeDeps.analyzeLive = realLive;
+    }
+    expect(await countCards("L")).toBe(0);
+  });
+
+  it("mặt trực tiếp khác chân dung thẻ → KHÔNG từ chối: 201 pending_review LIVE_MISMATCH; khung hình không bị lưu", async () => {
+    scenario("231230811", 21);
+    liveEmbedding = faceVector(22); // người khác cầm thẻ của L
+    const res = await submit("L");
+    expect(res.status).toBe(201);
+    expect(await readJson(res)).toEqual({ status: "pending_review", decodedCode: "231230811" });
+    const card = await liveCard("L");
+    expect(card.review_reasons).toEqual(["LIVE_MISMATCH"]);
+    expect(card.live_similarity).toBeLessThan(0.5);
+    expect(uploads.map((u) => u.path.split("/").pop())).toEqual(["card.jpg", "portrait.jpg"]); // không lưu ảnh mặt trực tiếp (FR-051)
+  });
+
+  it("mặt trực tiếp khớp chân dung → active, lưu live_similarity", async () => {
+    // P: đúng người, làm đúng thử thách
+    scenario("231230812", 23);
+    const res = await submit("P");
+    expect((await readJson(res)).status).toBe("active");
+    expect((await liveCard("P")).live_similarity).toBeGreaterThan(0.99);
+  });
+
+  it("thẻ bị từ chối ở bước đọc thẻ (CODE_MISMATCH / NO_PORTRAIT / UNREADABLE) → không upload, không ghi DB", async () => {
+    await q(`update student_cards set status='replaced' where student_id=$1`, [ids.P]); // cho P đăng ký lại
+    const before = await countCards("P");
+    const auditsOf = async () => (await q(`select 1 from audit_logs where action='card.register' and actor_id=$1`, [ids.P])).length;
+    const auditBefore = await auditsOf();
+    for (const s of [
+      () => scenario("231239999", 23),
+      () => scenario("231230812", 23, { faces: [] }),
+      () => { nextDecode = { decoded: null, text: "" }; nextFaces = [goodFace]; },
+    ]) {
+      s();
+      await q(`delete from rate_limits`);
+      expect((await submit("P")).status).toBe(422);
+    }
+    expect(uploads).toHaveLength(0);
+    expect(await countCards("P")).toBe(before);
+    expect(await auditsOf()).toBe(auditBefore);
   });
 });
 

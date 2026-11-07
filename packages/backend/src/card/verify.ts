@@ -6,7 +6,7 @@ import { namesMatch } from "@utc/shared/vn-text";
  */
 
 export type CardRejectCode = "UNREADABLE" | "CODE_MISMATCH" | "NO_PORTRAIT" | "MULTIPLE_FACES";
-export type CardReviewReason = "DUPLICATE_FACE" | "NAME_MISMATCH";
+export type CardReviewReason = "DUPLICATE_FACE" | "LIVE_MISMATCH" | "NAME_MISMATCH";
 
 export interface DecodedCode {
   code: string;
@@ -18,6 +18,8 @@ export interface PortraitFace {
   box: { x1: number; y1: number; x2: number; y2: number };
   /** 0..1 — phương sai Laplacian chuẩn hoá trên vùng mặt (imageQuality). */
   sharpness: number;
+  /** 5 điểm mốc SCRFD — cần cho ước lượng góc quay đầu (liveness). */
+  kps?: [number, number][];
 }
 
 /** Ngưỡng sơ bộ — hiệu chỉnh bằng ảnh thẻ thật trong scripts/calibrate (Nguyên tắc VI). */

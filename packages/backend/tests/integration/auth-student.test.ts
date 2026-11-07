@@ -141,7 +141,12 @@ describe("POST /api/auth/student/login", () => {
     expect(n).toBeGreaterThanOrEqual(1);
   });
 
-  it("rate limit theo mã SV: 5 lần/5 phút dù đổi IP, lần 6 → 429", async () => {
+  it("giới hạn theo mã KHÔNG khoá SV thật: 20 lần đăng nhập mã A từ 20 IP khác vẫn không chặn A từ IP của A", async () => {
+    for (let i = 0; i < 20; i++) expect((await login("231230801", `172.16.0.${i}`)).status, `lần ${i + 1}`).toBe(200);
+    expect((await login("231230801", "192.168.1.50")).status).toBe(200);
+  });
+
+  it("rate limit theo mã SV chỉ đếm lượt THẤT BẠI: 5 lần/5 phút dù đổi IP, lần 6 → 429", async () => {
     const code = "231230866"; // mã chưa dùng ở ca nào khác
     for (let i = 0; i < 5; i++) expect((await login(code, `10.7.0.${i}`)).status).toBe(401);
     expect((await login(code, "10.7.0.99")).status).toBe(429);

@@ -122,6 +122,8 @@ export const studentCards = pgTable(
     duplicateSimilarity: real("duplicate_similarity"),
     /** Họ tên OCR trên thẻ có khớp hồ sơ SV không (null = không đọc được chữ). */
     nameMatched: boolean("name_matched"),
+    /** Cosine giữa khung mặt trực tiếp (nhìn thẳng) lúc đăng ký và chân dung thẻ — khung hình KHÔNG được lưu (FR-045a, FR-051). */
+    liveSimilarity: real("live_similarity"),
   },
   (t) => [
     uniqueIndex("one_live_card_per_student")

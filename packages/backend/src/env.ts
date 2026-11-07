@@ -18,7 +18,7 @@ const EnvSchema = z.object({
   FACE_MODELS_DIR: z.string().default("models"),
   CARD_REJECT_BELOW: threshold.default(0.35),
   CARD_ACCEPT_ABOVE: threshold.default(0.5),
-  DUPLICATE_ABOVE: threshold.default(0.6),
+  DUPLICATE_ABOVE: threshold.default(0.45), // chờ hiệu chỉnh T011
   CHECKIN_MATCH_ABOVE: threshold.default(0.55),
   LEAVE_FIELD_CONFIDENCE: threshold.default(0.8),
   LEAVE_CHAT_APPROVAL_CONFIDENCE: threshold.default(0.85),

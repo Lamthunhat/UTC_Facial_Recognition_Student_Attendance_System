@@ -1,5 +1,5 @@
 import "server-only";
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@utc/database";
 import { studentCards, students } from "@utc/database/schema";
@@ -7,6 +7,8 @@ import { vnDateOf } from "@utc/shared/periods";
 import { writeAudit } from "../audit";
 import type { SessionClaims } from "../auth/jwt";
 import { removeObjects, signedUrl, uploadObject, type Bucket } from "../evidence/storage";
+import { checkLiveFrames, isChallenge, LIVENESS_RULES, samePerson, type Challenge, type LiveFrameError } from "../face/liveness";
+import { cosine } from "../face/similarity";
 import { HttpError } from "../http/errors";
 import { log } from "../log";
 import { consumeNonce, issueNonce } from "../security/nonce";
@@ -19,12 +21,15 @@ import { cardPurgeAfter } from "./retention";
 import { duplicateDecision, evaluateCard, nameAppearsIn, type CardRejectCode, type CardReviewReason, type DecodedCode } from "./verify";
 
 /**
- * T058 — Đăng ký thẻ sinh viên (US6, FR-045…FR-049, Principle I/III/IV, FR-082).
- * Thứ tự: đồng ý → thuộc lớp đang hoạt động → chưa có thẻ hiệu lực → tiêu thụ nonce → rate limit
- * (chỉ tính lượt có nonce hợp lệ, tức lượt tốn CPU) → sanitize ảnh → giải mã thẻ ∥ phân tích chân dung
- * → luật evaluateCard → embedding → kiểm trùng 1:N với SV chung lớp → lưu ảnh (bucket private) → ghi DB + audit
- * trong một transaction (DB lỗi thì xoá ảnh vừa lưu).
- * Trùng mặt / tên không khớp KHÔNG chặn: thẻ vào pending_review để giảng viên quyết (Principle III).
+ * T058 — Đăng ký thẻ sinh viên (US6, FR-045…FR-049, FR-045a, Principle I/III/IV, FR-082).
+ * Thứ tự: đồng ý → thuộc lớp đang hoạt động → chưa có thẻ hiệu lực → tiêu thụ nonce (kèm thử thách quay đầu)
+ * → rate limit (chỉ tính lượt có nonce hợp lệ, tức lượt tốn CPU) → sanitize thẻ + 3 khung mặt trực tiếp
+ * → giải mã thẻ ∥ phân tích chân dung → luật evaluateCard → liveness 3 khung → embedding
+ * → so mặt trực tiếp với chân dung thẻ → kiểm trùng 1:N với SV chung lớp
+ * → CHỈ KHI ĐÃ QUA HẾT mới lưu ảnh thẻ + chân dung (bucket private) → ghi DB + audit trong một transaction
+ *   (DB lỗi thì xoá ảnh vừa lưu). Thẻ bị từ chối ở bất kỳ bước nào: không lưu file, không ghi DB.
+ * Khung mặt trực tiếp KHÔNG BAO GIỜ được lưu (FR-051) — chỉ lưu độ tương đồng.
+ * Trùng mặt / mặt trực tiếp lệch thẻ / tên không khớp KHÔNG chặn: thẻ vào pending_review để giảng viên quyết (Principle III).
  */
 
 export interface CardStorage {
@@ -35,12 +40,15 @@ export interface CardStorage {
 export interface CardDeps {
   decode(jpeg: Buffer): Promise<{ decoded: DecodedCode | null; text: string }>;
   analyzeFaces(jpeg: Buffer): Promise<AnalyzedPortraits>;
+  /** Phân tích một khung mặt trực tiếp (cùng pipeline ONNX; tách riêng để test giả lập từng khung). */
+  analyzeLive(jpeg: Buffer): Promise<AnalyzedPortraits>;
   storage: CardStorage;
 }
 
 const realDeps: CardDeps = {
   decode: decodeCard,
   analyzeFaces: analyzePortraits,
+  analyzeLive: analyzePortraits,
   storage: { upload: uploadObject, remove: removeObjects, signedUrl: (b, p) => signedUrl(b, p) },
 };
 let deps: CardDeps = realDeps;
@@ -55,19 +63,30 @@ export function resetCardDepsForTest() {
 }
 export const cardDeps = () => deps;
 
-export const CARD_IMAGE_MAX_BYTES = 1024 * 1024; // FR-090: ảnh ≤ 1 MB
+export const CARD_IMAGE_MAX_BYTES = 1024 * 1024; // FR-090: ảnh thẻ ≤ 1 MB
+export const LIVE_FRAME_MAX_BYTES = 1024 * 1024; // FR-090: mỗi khung mặt trực tiếp ≤ 1 MB
+export const LIVE_FRAME_COUNT = 3;
 
-/** Ngưỡng trùng mặt (research R1; hiệu chỉnh bằng scripts/calibrate). Đọc trực tiếp để không cần toàn bộ env(). */
-export function duplicateThreshold() {
-  const v = Number(process.env.DUPLICATE_ABOVE ?? "0.6");
-  return Number.isFinite(v) && v > 0 && v <= 1 ? v : 0.6;
-}
+const threshold = (name: string, fallback: number) => {
+  const v = Number(process.env[name] ?? fallback);
+  return Number.isFinite(v) && v > 0 && v <= 1 ? v : fallback;
+};
+/** Ngưỡng trùng mặt 1:N — mặc định 0,45, CHỜ HIỆU CHỈNH T011 (research R1). Đọc trực tiếp để không cần toàn bộ env(). */
+export const duplicateThreshold = () => threshold("DUPLICATE_ABOVE", 0.45);
+/** Mặt trực tiếp ↔ chân dung thẻ: dưới ngưỡng → LIVE_MISMATCH (cùng ngưỡng "khớp thẻ" CARD_ACCEPT_ABOVE của điểm danh). */
+export const liveMatchThreshold = () => threshold("CARD_ACCEPT_ABOVE", 0.5);
 
 const REJECT_MESSAGES: Record<CardRejectCode, string> = {
   CODE_MISMATCH: "Thẻ không thuộc mã sinh viên này.",
   UNREADABLE: "Không đọc được thẻ (ảnh mờ, loá hoặc không thấy mã). Đặt thẻ trên nền phẳng, đủ sáng, chụp thẳng, rõ nét rồi thử lại.",
   NO_PORTRAIT: "Không thấy ảnh chân dung trên thẻ. Chụp trọn mặt trước thẻ, không để tay hay vật khác che ảnh.",
   MULTIPLE_FACES: "Ảnh có nhiều hơn một khuôn mặt. Chỉ chụp riêng mặt trước thẻ sinh viên của bạn.",
+};
+
+const LIVE_MESSAGES: Record<LiveFrameError, string> = {
+  LIVE_NO_FACE: "Không thấy khuôn mặt của bạn trong khung hình. Giữ mặt trong khung, đủ sáng rồi thử lại.",
+  LIVE_MULTIPLE_FACES: "Có nhiều hơn một người trong khung hình. Chỉ một mình bạn trước camera.",
+  LIVENESS_FAILED: "Chưa xác nhận được người thật: hãy làm đúng hướng dẫn quay đầu rồi thử lại.",
 };
 
 /** Kiểm tra rẻ, chạy trước khi cấp nonce và trước khi xử lý ảnh. */
@@ -95,8 +114,10 @@ export async function assertCanRegisterCard(studentId: string, today = vnDateOf(
 export async function issueCardNonce(session: SessionClaims) {
   await assertCanRegisterCard(session.sub);
   await enforce(`card-nonce:${session.sub}`, RULES.scanNonce);
-  const n = await issueNonce(session.sub, "card");
-  return { nonce: n.nonce, expiresAt: n.expiresAt };
+  // Thử thách quay đầu ngẫu nhiên (research R2): chặn phát lại video/ảnh quay sẵn.
+  const challenge: Challenge = randomInt(2) === 0 ? ["left", "right"] : ["right", "left"];
+  const n = await issueNonce(session.sub, "card", { challenge });
+  return { nonce: n.nonce, expiresAt: n.expiresAt, challenge };
 }
 
 function uploadErrorToHttp(e: UploadError) {
@@ -107,17 +128,26 @@ function uploadErrorToHttp(e: UploadError) {
 
 export async function registerCard(
   session: SessionClaims,
-  input: { nonce: string; image: Buffer },
+  input: { nonce: string; image: Buffer; frames: Buffer[] },
   ip: string | null,
 ): Promise<{ status: "active" | "pending_review"; decodedCode: string }> {
   const studentId = session.sub;
   await assertCanRegisterCard(studentId);
-  await consumeNonce({ nonce: input.nonce, studentId, purpose: "card", ip });
+  const { challenge } = await consumeNonce({ nonce: input.nonce, studentId, purpose: "card", ip });
+  if (!isChallenge(challenge)) throw new HttpError(403, "BAD_NONCE", "Phiên chụp không hợp lệ. Vui lòng chụp lại.");
   await enforce(`card:${studentId}`, RULES.cardRegister);
+  if (input.frames.length !== LIVE_FRAME_COUNT) {
+    throw new HttpError(422, "VALIDATION_ERROR", "Cần đúng 3 khung hình khuôn mặt theo hướng dẫn.");
+  }
 
+  const allowed: ("image/jpeg" | "image/png" | "image/webp" | "image/heic")[] = ["image/jpeg", "image/png", "image/webp", "image/heic"];
   let jpeg: Buffer;
+  let frames: Buffer[];
   try {
-    jpeg = (await sanitizeImage(input.image, { maxBytes: CARD_IMAGE_MAX_BYTES, allowed: ["image/jpeg", "image/png", "image/webp", "image/heic"], maxSide: 2048, quality: 90 })).buffer;
+    jpeg = (await sanitizeImage(input.image, { maxBytes: CARD_IMAGE_MAX_BYTES, allowed, maxSide: 2048, quality: 90 })).buffer;
+    frames = await Promise.all(
+      input.frames.map(async (f) => (await sanitizeImage(f, { maxBytes: LIVE_FRAME_MAX_BYTES, allowed, maxSide: 1280, quality: 85 })).buffer),
+    );
   } catch (e) {
     if (e instanceof UploadError) throw uploadErrorToHttp(e);
     throw e;
@@ -136,9 +166,23 @@ export async function registerCard(
   const verdict = evaluateCard({ sessionCode: me.code, decoded, faces: portraits.faces, nameMatched });
   if (!verdict.ok) throw new HttpError(422, verdict.error, REJECT_MESSAGES[verdict.error]);
 
+  // Liveness (FR-045a): 3 khung mặt trực tiếp đúng thử thách quay đầu và cùng một người. Sai → từ chối.
+  const live = await Promise.all(frames.map((f) => deps.analyzeLive(f)));
+  const liveCheck = checkLiveFrames(
+    live.map((l) => l.faces.filter((f) => f.kps).map((f) => ({ box: f.box, kps: f.kps! }))),
+    challenge,
+  );
+  if (!liveCheck.ok) throw new HttpError(422, liveCheck.error, LIVE_MESSAGES[liveCheck.error]);
+  const liveEmbeddings = await Promise.all(live.map((l) => l.embed(0)));
+  if (!samePerson(liveEmbeddings, liveCheck.centerIndex, LIVENESS_RULES.samePersonMin)) {
+    throw new HttpError(422, "LIVENESS_FAILED", LIVE_MESSAGES.LIVENESS_FAILED);
+  }
+
   const embedding = await portraits.embed(verdict.faceIndex);
   if (embedding.length !== 512) throw new Error(`Embedding sai số chiều: ${embedding.length}`);
   const portrait = await portraits.crop(verdict.faceIndex);
+  // Mặt trực tiếp (khung nhìn thẳng) có phải người trên thẻ không — lệch thì giảng viên duyệt, KHÔNG từ chối.
+  const liveSimilarity = cosine(liveEmbeddings[liveCheck.centerIndex], embedding);
 
   // Trùng mặt 1:N: chỉ so với thẻ hiệu lực của SV học CHUNG ít nhất một lớp (đang ghi danh) — FR-048, US6-6.
   const vec = `[${embedding.join(",")}]`;
@@ -155,7 +199,11 @@ export async function registerCard(
   const matches = (Array.isArray(res) ? res : (res as { rows: unknown[] }).rows) as { student_id: string; similarity: number }[];
   const dup = duplicateDecision(matches.map((m) => ({ studentId: m.student_id, similarity: Number(m.similarity) })), duplicateThreshold());
 
-  const reviewReasons: CardReviewReason[] = [...(dup ? (["DUPLICATE_FACE"] as const) : []), ...verdict.reviewReasons];
+  const reviewReasons: CardReviewReason[] = [
+    ...(dup ? (["DUPLICATE_FACE"] as const) : []),
+    ...(liveSimilarity < liveMatchThreshold() ? (["LIVE_MISMATCH"] as const) : []),
+    ...verdict.reviewReasons,
+  ];
   const status = reviewReasons.length ? "pending_review" : "active";
   const cardId = randomUUID();
   const cardPath = `${studentId}/${cardId}/card.jpg`;
@@ -179,9 +227,10 @@ export async function registerCard(
         duplicateStudentId: dup?.studentId ?? null,
         duplicateSimilarity: dup?.similarity ?? null,
         nameMatched,
+        liveSimilarity,
         purgeAfter: await cardPurgeAfter(tx, studentId),
       });
-      await writeAudit(session, "card.register", { type: "student_card", id: cardId }, { status, method: decoded!.method, reviewReasons }, tx);
+      await writeAudit(session, "card.register", { type: "student_card", id: cardId }, { status, method: decoded!.method, reviewReasons, liveSimilarity: Math.round(liveSimilarity * 1000) / 1000 }, tx);
     });
   } catch (e) {
     if (uploaded.length) await deps.storage.remove("cards", uploaded).catch((err) => log.error("card_cleanup_failed", { err: String(err) }));

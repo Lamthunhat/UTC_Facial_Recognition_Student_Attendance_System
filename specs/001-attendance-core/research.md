@@ -24,6 +24,7 @@ Mỗi mục theo dạng: Quyết định · Lý do · Phương án đã cân nh�
 - **Lý do**: Quyết định nằm ở server (Nguyên tắc I); thử thách ngẫu nhiên + nonce chặn phát lại video quay sẵn; ảnh in tĩnh không quay đầu được.
 - **Phương án đã cân nhắc**: chớp mắt (cần nhiều điểm mốc hơn, khó kiểm ở server với 5 điểm); liveness thụ động bằng model chống giả mạo (thêm model, độ tin cậy khó kiểm chứng) → để giai đoạn sau.
 - **Giới hạn đã biết**: không chống được mặt nạ 3D hay deepfake thời gian thực bơm vào camera ảo; chấp nhận cho phạm vi đồ án.
+- **Dùng cả khi đăng ký thẻ (FR-045a)**: cùng thử thách + 3 khung; khung nhìn thẳng so với chân dung thẻ. Lý do: chỉ chụp thẻ thì ai cầm được thẻ người khác (mượn, nhặt) cũng đăng ký được. Mặt trực tiếp lệch chân dung → hàng chờ `LIVE_MISMATCH` cho giảng viên, không từ chối (ảnh thẻ có thể cũ). Ngưỡng dùng `CARD_ACCEPT_ABOVE` như khi điểm danh. Quy ước yaw: ảnh camera trước gửi lên KHÔNG lật; SV quay trái → mũi lệch phải ảnh. Ngưỡng tư thế sơ bộ: nhìn thẳng |yaw| ≤ 0,12, quay ≥ 0,20; cùng người: cosine ≥ 0,5 — hiệu chỉnh ở T011.
 
 ## R3. Đọc thẻ sinh viên 🧪
 
@@ -31,6 +32,8 @@ Mỗi mục theo dạng: Quyết định · Lý do · Phương án đã cân nh�
 - **Lý do**: Mã vạch đọc ổn định hơn OCR; OCR làm phương án dự phòng. Cả hai chạy trong Node không cần dịch vụ ngoài.
 - **Cần xác minh**: mã vạch trên thẻ UTC có mã hoá đúng mã sinh viên không (kiểm bằng vài thẻ thật trong spike). Nếu không, OCR là đường chính.
 - **Chống ảnh có sẵn**: trang đăng ký chỉ mở camera trực tiếp (không có input file); ảnh gửi kèm nonce có hạn 2 phút.
+- **Ngưỡng trùng mặt 1:N (`DUPLICATE_ABOVE`)**: mặc định **0,45 — chờ hiệu chỉnh T011** (bộ ảnh thử ≥ 20 người). Hạ từ 0,6 vì ảnh in trên thẻ (cũ, chụp lại) cho độ tương đồng thấp hơn ảnh chụp trực tiếp; ngưỡng thấp chỉ làm nhiều thẻ vào hàng chờ duyệt hơn, không chặn sinh viên.
+- **Ngưỡng chân dung trên thẻ** (`PORTRAIT_RULES`): cạnh mặt tối thiểu 40 px, độ nét tối thiểu 0,02 — sơ bộ; hiệu chỉnh bằng `pnpm --filter @utc/backend calibrate:card <thư mục ảnh>` trên ảnh thẻ thật (chạy cục bộ, không lưu ảnh, không gửi đi đâu).
 - **Phương án đã cân nhắc**: Google Vision OCR (gửi dữ liệu ra ngoài, tốn phí); để giảng viên nhập tay (chậm, không chặn được thẻ người khác).
 
 ## R4. Cơ sở dữ liệu & lưu trữ
@@ -93,7 +96,7 @@ Mỗi mục theo dạng: Quyết định · Lý do · Phương án đã cân nh�
   - Quy trình sự cố: bật **Attack Challenge Mode** khi bị tấn công có chủ đích, tắt sau sự cố (không để thường trực vì sinh viên dùng điện thoại có thể bị thử thách).
   - Lưu ý: có báo cáo người dùng Hobby bị tấn công L7 không được tự chặn và phải tự thêm quy tắc rate limit → quy tắc WAF phải có ngay từ ngày đầu, không đợi sự cố.
 - **Quyết định (tầng ứng dụng)**:
-  - `@vercel/firewall` `checkRateLimit` với khoá tuỳ biến (mã SV, user id) cho: đăng nhập SV (10/5 phút/IP, 5/5 phút/mã), đăng nhập GV (5 lần sai → khoá 15 phút), nonce quét (6/phút/SV), gửi lượt (theo `attempt_no` ≤ 3/khung), thẻ (3/giờ/SV), AI (20/giờ/GV), xuất file (30/giờ/GV). Dự phòng: bảng `rate_limits` trong Postgres nếu SDK không khả dụng.
+  - `@vercel/firewall` `checkRateLimit` với khoá tuỳ biến (mã SV, user id) cho: đăng nhập SV (10/5 phút/IP đếm mọi lượt; 5/5 phút/mã **chỉ đếm lượt thất bại** — đăng nhập không cần mật khẩu nên nếu đếm cả lượt thành công, kẻ xấu đăng nhập liên tục mã A từ nhiều IP sẽ khoá được sinh viên A), đăng nhập GV (5 lần sai → khoá 15 phút), nonce quét (6/phút/SV), gửi lượt (theo `attempt_no` ≤ 3/khung), thẻ (3/giờ/SV), AI (20/giờ/GV), xuất file (30/giờ/GV). Dự phòng: bảng `rate_limits` trong Postgres nếu SDK không khả dụng.
   - Middleware Next.js đặt header: CSP có nonce (`default-src 'self'; img-src 'self' blob: data: <supabase-storage>; connect-src 'self'; frame-ancestors 'none'`), HSTS 2 năm + preload, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: camera=(self), geolocation=(self), microphone=()`.
   - CSRF: cookie `SameSite=Lax` + kiểm `Origin` khớp host cho mọi method ≠ GET.
   - Đầu vào: Zod `.strict()` cho mọi body; giới hạn body (khung ảnh điểm danh 1 MB/khung, ảnh minh chứng vắng phép 1,2 MB/ảnh, file danh sách 4 MB; tổng mỗi request ≤ 4 MB); kiểm magic bytes; `sharp` giải mã + mã hoá lại JPEG, bỏ EXIF; `exceljs` đọc với giới hạn số dòng/ô, từ chối tỉ lệ nén bất thường.

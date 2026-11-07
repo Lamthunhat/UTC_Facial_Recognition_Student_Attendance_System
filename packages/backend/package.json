@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "spike:face": "tsx --conditions=react-server scripts/spike-face.ts",
     "spike:card": "tsx scripts/spike-card.ts",
-    "admin:create": "tsx --conditions=react-server scripts/create-admin.ts"
+    "admin:create": "tsx --conditions=react-server scripts/create-admin.ts",
+    "calibrate:card": "tsx --conditions=react-server scripts/calibrate-card.ts"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",

@@ -19,7 +19,7 @@ export interface AnalyzedPortraits {
 export async function analyzePortraits(jpeg: Buffer): Promise<AnalyzedPortraits> {
   const rgb = await decodeToRgb(jpeg, 1280);
   const dets = await detectFaces(rgb, { scoreThreshold: 0.5 });
-  const faces: PortraitFace[] = dets.map((d) => ({ score: d.score, box: d.box, sharpness: imageQuality(rgb, d.box).sharpness }));
+  const faces: PortraitFace[] = dets.map((d) => ({ score: d.score, box: d.box, kps: d.kps, sharpness: imageQuality(rgb, d.box).sharpness }));
   return {
     faces,
     embed: async (i) => Array.from(await embedFace(rgb, dets[i].kps)),
