@@ -47,7 +47,7 @@
 
 ### 5. Đang dở
 - **PR #1** (`001-attendance-core` → `main`) đã mở, **chưa merge**; Vercel Preview build thành công.
-- **CI không tự chạy** trên push lẫn PR. Khối `on:` trong `ci.yml` đã kiểm (`push: [main]`, `pull_request`, `workflow_dispatch`) — không sai; GitHub đã ghi nhận `PullRequestEvent`; nguyên nhân chưa rõ. Chạy tay được: `gh workflow run CI --ref <nhánh>`.
+- **CI không tự chạy** khi push lên `main` (4 lần, 2026-11-07) và trên PR #1. Khối `on:` của `ci.yml` (đã in nguyên văn, đúng cú pháp): `push:` → `branches: [main]`; `pull_request:` (không lọc nhánh = mọi nhánh); `workflow_dispatch:`. Không có `concurrency`, không có `if` cấp job. Push lên nhánh tính năng không chạy CI là **đúng thiết kế** (push chỉ lọc `main`). GitHub đã ghi nhận `PullRequestEvent`; nguyên nhân chưa rõ. Bước tiếp: thêm tạm `.github/workflows/ping.yml` (`on: [push, pull_request]`, một bước `echo ok`), push lên nhánh PR — ping chạy mà CI không → lỗi trong `ci.yml`; ping cũng không chạy → phía GitHub/cài đặt repo (`gh api repos/{owner}/{repo}/actions/permissions`); xong xoá `ping.yml`. Chạy tay được: `gh workflow run CI --ref <nhánh>`.
 - Kiểm Preview cần `$env:VERCEL_BYPASS` (Preview có Deployment Protection, trả 302 sang SSO).
 - Chuyển HMAC log sang biến riêng `LOG_HMAC_SECRET` (code hiện **chưa** đọc biến này).
 - Đo cold/warm + bộ nhớ `POST /api/student/card` trên Preview (cục bộ: ~4,4 s / ~1,9 s, RSS ~600 MB); xác nhận đường dẫn model theo `process.cwd()` trên Vercel.
