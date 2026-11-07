@@ -42,6 +42,7 @@ next-env.d.ts
 models/
 .pglite/
 !.env.example
+.env.staging
 
 # Playwright / kết quả test cục bộ
 test-results/
