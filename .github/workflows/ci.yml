@@ -30,14 +30,28 @@ jobs:
       - name: Audit dependencies (chặn High/Critical — FR-096)
         run: pnpm audit --prod --audit-level high
 
+  # Repo private (tài khoản cá nhân) không có code scanning miễn phí → không upload lên tab Security.
+  # CodeQL vẫn phân tích; kết quả SARIF được chặn ngay trong CI và lưu làm artifact để tải về xem.
   codeql:
     runs-on: ubuntu-latest
     permissions:
-      security-events: write
       contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
       - uses: github/codeql-action/init@v3
         with:
           languages: javascript-typescript
       - uses: github/codeql-action/analyze@v3
+        with:
+          upload: never
+          output: codeql-results
+      - name: Lưu kết quả SARIF
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeql-sarif
+          path: codeql-results
+          if-no-files-found: ignore
+      - name: Chặn khi có cảnh báo bảo mật (error/warning)
+        run: node .github/scripts/codeql-gate.mjs codeql-results
