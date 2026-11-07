@@ -45,6 +45,7 @@ jobs:
       - uses: github/codeql-action/analyze@v3
         with:
           upload: never
+          upload-database: false
           output: codeql-results
       - name: Lưu kết quả SARIF
         if: always()
