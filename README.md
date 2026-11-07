@@ -75,4 +75,4 @@ Seed vào một DB khác mà không sửa `.env.local`: đặt `DATABASE_URL` �
 - Không commit ảnh khuôn mặt, ảnh thẻ, file `.env*` hay thư mục `models/`.
 - **An toàn dữ liệu khi chạy script**: `pnpm db:seed:demo` chỉ chạy trên DB cục bộ (`pglite:` hoặc localhost/127.0.0.1) — bị chặn với `NODE_ENV=production`, Supabase hay mọi DB remote, không có cờ nào mở được. `pnpm db:migrate` và `pnpm admin:create` được chạy lên DB remote nhưng phải xác nhận cho riêng lần chạy đó: PowerShell `$env:CONFIRM_REMOTE_DB="true"; pnpm db:migrate; Remove-Item Env:CONFIRM_REMOTE_DB` — bash `CONFIRM_REMOTE_DB=true pnpm db:migrate`. Không đặt `CONFIRM_REMOTE_DB` trong file `.env*`.
 - Font Be Vietnam Pro theo giấy phép SIL OFL 1.1 (`apps/web/public/fonts/OFL.txt`).
-- Deploy Vercel: Root Directory = `apps/web`.
+- Deploy Vercel + Supabase: xem [`docs/deploy.md`](docs/deploy.md) (biến môi trường, migrate, bucket, admin, checklist). Root Directory = `apps/web`; lệnh cài/build trong `apps/web/vercel.json`.

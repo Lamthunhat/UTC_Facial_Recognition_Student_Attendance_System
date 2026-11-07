@@ -348,6 +348,7 @@ US1 (P1) → US6 (P1, thẻ SV — cần trước khi điểm danh) → US2 (P1)
 - [ ] T141 [P] Rà soát truy cập (a11y) và hiển thị di động cho màn hình SV trong `apps/web/src/app/sv/**`
 - [ ] T142 [P] README + hướng dẫn triển khai Vercel/Supabase, biến môi trường trong `README.md`, `docs/deploy.md`
 - [ ] T143 Chạy toàn bộ quickstart.md (Q1–Q27, S1–S11) và đánh dấu kết quả trong `specs/001-attendance-core/quickstart.md`
+- [ ] T144 [P] Đăng nhập SV vượt ngưỡng thất bại theo IP (50/5 phút) → hiện thử thách Cloudflare Turnstile (xác minh token ở server, khoá site/secret qua env) thay vì trả 429, để cả lớp sau NAT Wi-Fi không bị chặn cứng; giữ 429 làm phương án dự phòng khi Turnstile lỗi; thêm `security_events` cho thử thách thất bại trong `packages/backend/src/auth/student-login.ts`, `packages/backend/src/security/turnstile.ts`, `apps/web/src/app/(auth)/sv/page.tsx` (FR-083: "thử thách chống bot")
 
 ---
 
@@ -406,6 +407,6 @@ Task: "Unit test upload trong packages/backend/tests/unit/security/upload.test.t
 
 ## Notes
 
-- Tổng: 143 task (Setup 8 · Spike 4 · Foundational 27 · US1 13 · US6 12 · US2 20 · US3 4 · US5 8 · US4 6 · US9 5 · US8 12 · US7 11 · Polish 13)
+- Tổng: 144 task (Setup 8 · Spike 4 · Foundational 27 · US1 13 · US6 12 · US2 20 · US3 4 · US5 8 · US4 6 · US9 5 · US8 12 · US7 11 · Polish 14)
 - Không commit ảnh khuôn mặt/thẻ thật vào repo; bộ ảnh hiệu chỉnh để ngoài repo
 - Commit sau mỗi task hoặc nhóm task logic; dừng ở mỗi Checkpoint để kiểm tra story độc lập

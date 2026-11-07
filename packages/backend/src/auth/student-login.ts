@@ -15,7 +15,7 @@ import { assertNotLimited, enforce, hit, RULES } from "../security/rate-limit";
  *   vẫn tính để SV đăng ký thẻ trước buổi đầu).
  * - Mọi lý do thất bại (không tồn tại, không thuộc lớp, đã rút, lớp kết thúc, sai định dạng) đi cùng một nhánh,
  *   trả cùng 401 LOGIN_FAILED và cùng thông báo; tra cứu bằng MỘT truy vấn nên thời gian phản hồi như nhau.
- * - Rate limit (R14): theo IP chỉ đếm lượt THẤT BẠI (20/5') + trần tổng mọi lượt (300/5') — cả lớp sau một NAT Wi-Fi
+ * - Rate limit (R14): theo IP chỉ đếm lượt THẤT BẠI (50/5') + trần tổng mọi lượt (300/5') — cả lớp sau một NAT Wi-Fi
  *   đăng nhập được; theo mã chỉ đếm lượt THẤT BẠI (5/5') — người khác không khoá hộ được mã của SV thật.
  *   Khi bộ đếm thất bại đã đầy, chặn MỌI lượt trước khi tra cứu (không để lộ mã đúng qua khác biệt 200/429).
  *   Vượt → 429 (handler ghi security_events rate_limited).

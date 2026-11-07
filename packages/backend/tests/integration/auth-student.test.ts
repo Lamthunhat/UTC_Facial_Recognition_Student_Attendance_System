@@ -134,9 +134,9 @@ describe("POST /api/auth/student/login", () => {
     expect(JSON.stringify(rows[0].meta)).not.toContain("231239999");
   });
 
-  it("rate limit theo IP chỉ đếm lượt THẤT BẠI: 20 lần/5 phút; sau đó MỌI lượt từ IP đó bị chặn (kể cả mã đúng — không để lộ mã đúng qua 200/429)", async () => {
+  it("rate limit theo IP chỉ đếm lượt THẤT BẠI: 50 lần/5 phút; sau đó MỌI lượt từ IP đó bị chặn (kể cả mã đúng — không để lộ mã đúng qua 200/429)", async () => {
     const ip = "10.9.9.9";
-    for (let i = 0; i < 20; i++) expect((await login(`2312400${String(i).padStart(2, "0")}`, ip)).status, `lần ${i + 1}`).toBe(401);
+    for (let i = 0; i < 50; i++) expect((await login(`23124${String(i).padStart(4, "0")}`, ip)).status, `lần ${i + 1}`).toBe(401);
     const res = await login("231230801", ip);
     expect(res.status).toBe(429);
     expect(res.headers.get("Retry-After")).toBeTruthy();

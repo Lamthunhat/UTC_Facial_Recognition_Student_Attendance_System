@@ -20,8 +20,11 @@ export interface RateLimitRule {
  * không được làm nhau bị chặn.
  */
 export const RULES = {
-  /** Đăng nhập SV theo IP: chỉ đếm lượt THẤT BẠI (chống dò mã); vượt thì chặn mọi lượt từ IP đó. */
-  studentLoginIpFail: { limit: 20, windowSec: 300 },
+  /**
+   * Đăng nhập SV theo IP: chỉ đếm lượt THẤT BẠI (chống dò mã); vượt thì chặn mọi lượt từ IP đó.
+   * 50 vì nhiều lớp chung một NAT Wi-Fi trường và SV gõ nhầm mã. Polish T144: vượt ngưỡng → Turnstile thay vì 429.
+   */
+  studentLoginIpFail: { limit: 50, windowSec: 300 },
   /** Trần tổng mọi lượt đăng nhập SV theo IP (đủ cho vài lớp sau một NAT, chặn lạm dụng). */
   studentLoginIpTotal: { limit: 300, windowSec: 300 },
   /** Đăng nhập SV theo mã: chỉ đếm lượt THẤT BẠI — người khác không thể khoá hộ mã của SV thật. */
