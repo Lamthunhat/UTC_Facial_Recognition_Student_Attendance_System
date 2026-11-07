@@ -43,6 +43,15 @@ pnpm admin:create
 
 Rồi chạy lại `pnpm dev` và đăng nhập tại `/login`.
 
+**Dữ liệu demo (tuỳ chọn)** — tạo `admin@demo.utc.edu.vn`, giảng viên `gv.demo@demo.utc.edu.vn` và một lớp mẫu (Thứ 7, tiết 1–3). Cũng phải dừng `pnpm dev` trước. Script đọc `DATABASE_URL` giống `admin:create` (biến shell → `apps/web/.env.local` → `.env` gốc; ưu tiên `DIRECT_DATABASE_URL` nếu có), nên dùng được cho cả `pglite:` lẫn Postgres/Supabase; không chạy khi `NODE_ENV=production`. Chạy lại nhiều lần được — tài khoản đã có chỉ cập nhật tên, **không** đổi mật khẩu.
+
+```powershell
+$env:SEED_ADMIN_PASSWORD="mat-khau-admin-demo"; $env:SEED_INSTRUCTOR_PASSWORD="mat-khau-gv-demo"
+pnpm db:seed:demo
+```
+
+Seed vào một DB khác mà không sửa `.env.local`: đặt `DATABASE_URL` ở shell, ví dụ `$env:DATABASE_URL="pglite:D:\tmp\demo-db"` (đường dẫn tương đối tính từ thư mục đang đứng).
+
 ## Lệnh thường dùng (chạy ở thư mục gốc)
 
 | Lệnh | Việc |
@@ -54,7 +63,7 @@ Rồi chạy lại `pnpm dev` và đăng nhập tại `/login`.
 | `pnpm db:generate` | Sinh migration từ `packages/database/src/schema.ts` |
 | `pnpm db:migrate` | Chạy migration + seed 16 tiết / 5 ca vào database trong `DATABASE_URL` |
 | `pnpm admin:create` | Tạo/đặt lại tài khoản Admin (`ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME`) |
-| `pnpm db:seed:demo` | Dữ liệu demo (cần `SEED_ADMIN_PASSWORD`, `SEED_INSTRUCTOR_PASSWORD`) |
+| `pnpm db:seed:demo` | Dữ liệu demo cho `pglite:` hoặc Postgres (cần `SEED_ADMIN_PASSWORD`, `SEED_INSTRUCTOR_PASSWORD`; dừng `pnpm dev` nếu dùng pglite) — xem mục Bắt đầu |
 | `pnpm --filter @utc/backend spike:face <ảnh>` | Đo tốc độ nhận diện khuôn mặt |
 | `pnpm --filter @utc/backend spike:card <ảnh thẻ>` | Thử đọc mã vạch thẻ sinh viên |
 | `pnpm --filter @utc/backend calibrate:card <thư mục ảnh>` | Đo đọc thẻ trên ảnh thẻ thật (cục bộ, không lưu/gửi ảnh) — xác nhận R3, hiệu chỉnh ngưỡng chân dung |
