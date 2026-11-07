@@ -20,11 +20,27 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
   transpilePackages: ["@utc/backend", "@utc/database", "@utc/shared"],
-  serverExternalPackages: ["onnxruntime-node", "sharp", "zxing-wasm", "@node-rs/argon2", "@electric-sql/pglite", "@electric-sql/pglite-pgvector"],
+  serverExternalPackages: [
+    "onnxruntime-node",
+    "sharp",
+    "zxing-wasm",
+    "tesseract.js",
+    "@node-rs/argon2",
+    "@electric-sql/pglite",
+    "@electric-sql/pglite-pgvector",
+  ],
   // Gốc monorepo để Vercel đóng gói được mã trong packages/*
   outputFileTracingRoot: path.join(__dirname, "../.."),
   outputFileTracingIncludes: {
     "/api/**": ["./models/*.onnx", "./public/fonts/*.ttf"],
+    // Đọc thẻ (T057): wasm + worker + dữ liệu OCR được nạp bằng đường dẫn lúc chạy nên trình trace không tự thấy.
+    // Chỉ bản 4.0.0_best_int (~2,6 MB) của dữ liệu tiếng Việt.
+    "/api/student/card": [
+      "./node_modules/zxing-wasm/dist/reader/zxing_reader.wasm",
+      "./node_modules/tesseract.js/src/worker-script/node/**",
+      "./node_modules/@tesseract.js-data/vie/4.0.0_best_int/*",
+      "../../node_modules/.pnpm/tesseract.js-core@*/node_modules/tesseract.js-core/*.{js,wasm}",
+    ],
   },
   outputFileTracingExcludes: {
     "*": OTHER_PLATFORM_BINARIES,

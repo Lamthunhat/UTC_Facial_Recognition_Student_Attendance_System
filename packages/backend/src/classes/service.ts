@@ -6,6 +6,7 @@ import { shiftToPeriods, SHIFTS } from "@utc/shared/periods";
 import type { SessionClaims } from "../auth/jwt";
 import { forbidden, HttpError, notFound } from "../http/errors";
 import { auditClassCreated, auditClassUpdated } from "./audit";
+import { refreshCardRetention } from "../card/retention";
 
 /**
  * T047 — Lớp học phần (FR-010…FR-010d): tạo/sửa, ≤ 15 tuần (105 ngày), lịch nhiều buổi/tuần theo tiết hoặc ca,
@@ -229,6 +230,7 @@ export async function updateClass(actor: SessionClaims, id: string, patch: Updat
       await tx.insert(classSchedules).values(schedules.map((s) => ({ classId: id, ...s })));
     }
     const fields = (Object.keys(patch) as (keyof UpdateClassInput)[]).filter((k) => patch[k] !== undefined);
+    if (patch.endDate !== undefined) await refreshCardRetention(tx, { classId: id }); // T064
     await auditClassUpdated(tx, actor, id, fields);
   });
   return getClass(id);

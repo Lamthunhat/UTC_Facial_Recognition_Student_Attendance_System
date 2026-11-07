@@ -15,6 +15,13 @@
       "when": 1793993694317,
       "tag": "0001_hardening",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794038249782,
+      "tag": "0002_card_review",
+      "breakpoints": true
     }
   ]
 }

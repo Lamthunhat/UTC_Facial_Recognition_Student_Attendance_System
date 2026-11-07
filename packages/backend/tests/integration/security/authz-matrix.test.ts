@@ -75,6 +75,51 @@ describe("ma trận phân quyền API backend (T039)", () => {
   }
 });
 
+describe("tách vai trò sinh viên (US6) — tự áp dụng cho route mới", () => {
+  const inDir = (dir: string) => files.filter((f) => path.relative(API_DIR, f).split(path.sep)[0] === dir);
+  const studentFiles = inDir("student");
+  const adminFiles = inDir("admin");
+  const handlersOf = async (file: string) => {
+    const mod = (await import(file)) as Record<string, RouteHandler | undefined>;
+    return METHODS.filter((m) => typeof mod[m] === "function").map((m) => [m, mod[m]!] as const);
+  };
+
+  it("có API sinh viên để kiểm tra", () => expect(studentFiles.length).toBeGreaterThan(0));
+
+  for (const file of studentFiles) {
+    const rel = path.relative(API_DIR, file);
+    it(`${rel}: chỉ vai trò student`, async () => {
+      for (const [m, h] of await handlersOf(file)) expect(h.roles, `${rel} ${m}`).toEqual(["student"]);
+    });
+  }
+
+  for (const file of adminFiles) {
+    const rel = path.relative(API_DIR, file);
+    it(`${rel}: không bao giờ cho vai trò student`, async () => {
+      for (const [m, h] of await handlersOf(file)) expect(h.roles ?? [], `${rel} ${m}`).not.toContain("student");
+    });
+  }
+
+  // Constitution IV / FR-050: SV chưa đồng ý → mọi API thẻ/khuôn mặt trả 403 trước khi làm gì khác.
+  for (const file of studentFiles.filter((f) => path.basename(f) !== "consent.ts")) {
+    const rel = path.relative(API_DIR, file);
+    it(`${rel}: SV chưa đồng ý điều khoản → 403 CONSENT_REQUIRED`, async () => {
+      for (const [m, h] of await handlersOf(file)) {
+        const res = await h(
+          new Request(`http://localhost/api/x`, {
+            method: m,
+            headers: { origin: "http://localhost", "content-type": "application/json", cookie: cookies.student! },
+            body: m === "GET" ? undefined : "{}",
+          }),
+          { params: Promise.resolve({ id: FAKE_ID }) },
+        );
+        expect(res.status, `${rel} ${m}`).toBe(403);
+        expect(((await res.json()) as { error: { code: string } }).error.code, `${rel} ${m}`).toBe("CONSENT_REQUIRED");
+      }
+    });
+  }
+});
+
 describe("route Next.js chỉ là lớp mỏng (Constitution, plan.md Structure)", () => {
   const webRoutes = walk(WEB_API_DIR).filter((f) => f.endsWith("route.ts"));
   for (const f of webRoutes) {

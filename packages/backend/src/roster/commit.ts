@@ -4,6 +4,7 @@ import { classes, enrollments, students } from "@utc/database/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { SessionClaims } from "../auth/jwt";
 import { auditEnrollmentChange, auditRosterImported } from "../classes/audit";
+import { refreshCardRetention } from "../card/retention";
 import { HttpError } from "../http/errors";
 import { cleanCell, extractRoster, STUDENT_CODE_RE, type ColumnMapping, type ExtractedRoster, type PreviewRow, type RosterStudent } from "./columns";
 import { parseRosterFile, RosterFileError } from "./parse";
@@ -215,6 +216,7 @@ export async function commitRoster(
       existing: diff.existing.length,
       withdrawn: diff.toWithdraw.length,
     };
+    await refreshCardRetention(tx, { classId }); // T064: ghi danh đổi → hạn giữ ảnh thẻ đổi
     await auditRosterImported(tx, actor, classId, { ...result, invalidRows: opts.invalidRows ?? 0 });
     return result;
   });
@@ -280,6 +282,7 @@ export async function addStudent(
     } else {
       r = { enrollment, changed: false, created: false };
     }
+    if (r.changed) await refreshCardRetention(tx, { studentIds: [s.id] });
     await auditEnrollmentChange(tx, actor, classId, "add", r);
     return r;
   });
@@ -307,6 +310,7 @@ export async function withdrawStudent(actor: SessionClaims, classId: string, raw
       .set({ status: "withdrawn", withdrawnAt: sql`now()` })
       .where(and(eq(enrollments.classId, classId), eq(enrollments.studentId, row.studentId)));
     const r: EnrollmentChange = { enrollment, changed: true, created: false };
+    await refreshCardRetention(tx, { studentIds: [row.studentId] });
     await auditEnrollmentChange(tx, actor, classId, "withdraw", r);
     return r;
   });

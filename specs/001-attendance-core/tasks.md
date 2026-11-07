@@ -133,21 +133,21 @@ US1 (P1) → US6 (P1, thẻ SV — cần trước khi điểm danh) → US2 (P1)
 
 ### Tests
 
-- [ ] T053 [P] [US6] Unit test xác thực thẻ: mã đọc được khác mã đăng nhập → `CODE_MISMATCH`; không thấy chân dung → `NO_PORTRAIT`; mờ → `UNREADABLE` trong `packages/backend/tests/unit/card/verify.test.ts`
-- [ ] T054 [P] [US6] Integration test đăng nhập SV (không thuộc lớp → 404 chung chung, rate limit 10/5'/IP, 5/5'/mã) trong `packages/backend/tests/integration/auth-student.test.ts`
-- [ ] T055 [P] [US6] Integration test đăng ký thẻ: nonce hết hạn/dùng lại bị từ chối; thẻ trùng mặt mã khác → `pending_review` trong `packages/backend/tests/integration/card.test.ts`
+- [x] T053 [P] [US6] Unit test xác thực thẻ: mã đọc được khác mã đăng nhập → `CODE_MISMATCH`; không thấy chân dung → `NO_PORTRAIT`; mờ → `UNREADABLE` trong `packages/backend/tests/unit/card/verify.test.ts`
+- [x] T054 [P] [US6] Integration test đăng nhập SV (không thuộc lớp → 404 chung chung, rate limit 10/5'/IP, 5/5'/mã) trong `packages/backend/tests/integration/auth-student.test.ts`
+- [x] T055 [P] [US6] Integration test đăng ký thẻ: nonce hết hạn/dùng lại bị từ chối; thẻ trùng mặt mã khác → `pending_review` trong `packages/backend/tests/integration/card.test.ts`
 
 ### Implementation
 
-- [ ] T056 [P] [US6] ONNX sessions dùng chung (nạp 1 lần/instance), detect SCRFD + 5 điểm mốc, align, embed 512-d, cosine trong `packages/backend/src/face/{sessions,detect,align,embed,similarity}.ts`
-- [ ] T057 [P] [US6] Đọc mã vạch (`zxing-wasm`) + OCR dự phòng (`tesseract.js` chỉ chữ số) trong `packages/backend/src/card/decode.ts`
-- [ ] T058 [US6] Xác thực thẻ: decode → so mã → detect chân dung trên thẻ → crop → embed → kiểm trùng thẻ active (pgvector) → lưu `student_cards` + ảnh vào bucket `cards`, tính `purge_after` trong `packages/backend/src/card/register.ts`
-- [ ] T059 [US6] Nonce dùng một lần (purpose card/checkin, hạn 2', challenge) trong `packages/backend/src/security/nonce.ts`
-- [ ] T060 [US6] API `POST /api/auth/student/login` (thông báo lỗi chung, rate limit, ghi security_events), `POST /api/student/consent`, `POST /api/student/card/nonce`, `POST /api/student/card` trong `apps/web/src/app/api/auth/student/login/route.ts`, `apps/web/src/app/api/student/**/route.ts`
-- [ ] T061 [US6] API duyệt/đặt lại thẻ `POST /api/admin/students/{id}/card/reset` (+ duyệt `pending_review` cho GV có SV trong lớp) trong `apps/web/src/app/api/admin/students/[id]/card/**/route.ts`
+- [x] T056 [P] [US6] ONNX sessions dùng chung (nạp 1 lần/instance), detect SCRFD + 5 điểm mốc, align, embed 512-d, cosine trong `packages/backend/src/face/{sessions,detect,align,embed,similarity}.ts`
+- [x] T057 [P] [US6] Đọc mã vạch (`zxing-wasm`) + OCR dự phòng (`tesseract.js` chỉ chữ số) trong `packages/backend/src/card/decode.ts`
+- [x] T058 [US6] Xác thực thẻ: decode → so mã → detect chân dung trên thẻ → crop → embed → kiểm trùng thẻ active (pgvector) → lưu `student_cards` + ảnh vào bucket `cards`, tính `purge_after` trong `packages/backend/src/card/register.ts`
+- [x] T059 [US6] Nonce dùng một lần (purpose card/checkin, hạn 2', challenge) trong `packages/backend/src/security/nonce.ts`
+- [x] T060 [US6] API `POST /api/auth/student/login` (thông báo lỗi chung, rate limit, ghi security_events), `POST /api/student/consent`, `POST /api/student/card/nonce`, `POST /api/student/card` trong `apps/web/src/app/api/auth/student/login/route.ts`, `apps/web/src/app/api/student/**/route.ts`
+- [x] T061 [US6] API duyệt/đặt lại thẻ `POST /api/admin/students/{id}/card/reset` (+ duyệt `pending_review` cho GV có SV trong lớp) trong `apps/web/src/app/api/admin/students/[id]/card/**/route.ts`
 - [ ] T062 [P] [US6] UI đăng nhập SV bằng mã trong `apps/web/src/app/(auth)/sv/page.tsx`
 - [ ] T063 [US6] UI đồng ý điều khoản + chụp thẻ chỉ bằng camera trực tiếp (không input file), khung căn thẻ, hướng dẫn chụp lại trong `apps/web/src/app/sv/the-sinh-vien/page.tsx`, `apps/web/src/components/camera/CardCapture.tsx`
-- [ ] T064 [US6] Cập nhật `purge_after` của thẻ khi ghi danh/ngày kết thúc lớp thay đổi trong `packages/backend/src/card/retention.ts`
+- [x] T064 [US6] Cập nhật `purge_after` của thẻ khi ghi danh/ngày kết thúc lớp thay đổi trong `packages/backend/src/card/retention.ts`
 
 **Checkpoint**: SV có thẻ `active`; Q4–Q5 đạt
 

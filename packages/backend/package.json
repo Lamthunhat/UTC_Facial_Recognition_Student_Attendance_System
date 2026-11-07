@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",
+    "@tesseract.js-data/vie": "1.0.0",
     "@utc/database": "workspace:*",
     "@utc/shared": "workspace:*",
     "drizzle-orm": "^0.45.4",
@@ -27,6 +28,7 @@
     "papaparse": "^5.7.0",
     "server-only": "^0.0.1",
     "sharp": "^0.35.5",
+    "tesseract.js": "7.0.0",
     "zod": "^4.6.7",
     "zxing-wasm": "^3.1.6"
   },
