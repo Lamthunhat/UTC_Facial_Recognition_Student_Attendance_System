@@ -8,7 +8,8 @@
     "./client": "./src/client.ts",
     "./seed/periods": "./src/seed/periods.ts",
     "./testing": "./src/testing.ts",
-    "./migrator": "./src/migrator.ts"
+    "./migrator": "./src/migrator.ts",
+    "./db-target": "./src/db-target.ts"
   },
   "scripts": {
     "test": "vitest run",

@@ -73,5 +73,6 @@ Seed vào một DB khác mà không sửa `.env.local`: đặt `DATABASE_URL` �
 
 - **Giấy phép model khuôn mặt**: trọng số InsightFace `buffalo_s` (SCRFD-500M + MobileFaceNet) chỉ được dùng cho **mục đích phi thương mại / nghiên cứu học thuật** — phù hợp đồ án, KHÔNG dùng cho sản phẩm thương mại hay dịch vụ thu phí (khi đó phải thay model có giấy phép thương mại và hiệu chỉnh lại ngưỡng). Repo không phân phối lại model: tải bằng `pnpm models:download` (kiểm SHA-256). Chi tiết: `specs/001-attendance-core/research.md` R1.
 - Không commit ảnh khuôn mặt, ảnh thẻ, file `.env*` hay thư mục `models/`.
+- **An toàn dữ liệu khi chạy script**: `pnpm db:seed:demo` chỉ chạy trên DB cục bộ (`pglite:` hoặc localhost/127.0.0.1) — bị chặn với `NODE_ENV=production`, Supabase hay mọi DB remote, không có cờ nào mở được. `pnpm db:migrate` và `pnpm admin:create` được chạy lên DB remote nhưng phải xác nhận cho riêng lần chạy đó: PowerShell `$env:CONFIRM_REMOTE_DB="true"; pnpm db:migrate; Remove-Item Env:CONFIRM_REMOTE_DB` — bash `CONFIRM_REMOTE_DB=true pnpm db:migrate`. Không đặt `CONFIRM_REMOTE_DB` trong file `.env*`.
 - Font Be Vietnam Pro theo giấy phép SIL OFL 1.1 (`apps/web/public/fonts/OFL.txt`).
 - Deploy Vercel: Root Directory = `apps/web`.

@@ -9,11 +9,14 @@
  *   apps/web (giống `pnpm dev`) — nên seed vào đúng DB mà app đang dùng.
  * - DIRECT_DATABASE_URL (kết nối trực tiếp, port 5432) được ưu tiên nếu có.
  * - Chạy lại nhiều lần được (upsert theo email / mã lớp; không đổi mật khẩu tài khoản đã có).
+ * - CHỈ chạy trên DB cục bộ (pglite: / localhost / 127.0.0.1): cấm NODE_ENV=production, Supabase và mọi DB remote —
+ *   kiểm ngay đầu main(), trước khi kết nối (src/db-target.ts). Không có cờ nào mở được.
  */
 import { config } from "dotenv";
 import path from "node:path";
 import { hash } from "@node-rs/argon2";
 import { sql } from "drizzle-orm";
+import { seedGuardError } from "../src/db-target";
 
 const ROOT = path.resolve(__dirname, "../../..");
 const WEB = path.join(ROOT, "apps/web");
@@ -28,7 +31,11 @@ if (url.startsWith("pglite:") && !path.isAbsolute(url.slice(7))) {
 }
 
 async function main() {
-  if (process.env.NODE_ENV === "production") throw new Error("Không chạy seed demo trên production");
+  const guard = seedGuardError(process.env);
+  if (guard) {
+    console.error(guard);
+    process.exit(1);
+  }
   const adminPw = process.env.SEED_ADMIN_PASSWORD;
   const gvPw = process.env.SEED_INSTRUCTOR_PASSWORD;
   if (!process.env.DATABASE_URL || !adminPw || !gvPw) {

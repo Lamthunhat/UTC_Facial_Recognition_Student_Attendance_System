@@ -5,10 +5,12 @@
  * - Postgres/Supabase: ưu tiên DIRECT_DATABASE_URL (kết nối trực tiếp port 5432 — migration cần phiên dài hơn pooler).
  * - `pglite:<thư mục>`: mở qua openLocalDb (cùng đường chạy với `pnpm dev`). Dừng `pnpm dev` trước khi chạy.
  * Đọc DATABASE_URL giống create-admin.ts: biến shell → apps/web/.env.local → .env gốc.
+ * DB remote (không phải pglite:/localhost) → bắt buộc CONFIRM_REMOTE_DB=true cho lần chạy đó (src/db-target.ts).
  */
 import { config } from "dotenv";
 import path from "node:path";
 import postgres from "postgres";
+import { remoteWriteGuardError } from "../src/db-target";
 import { postgresJsExecutor, runMigrations } from "../src/migrator";
 import { seedPeriodsSql } from "../src/seed/periods";
 
@@ -25,6 +27,11 @@ if (url.startsWith("pglite:") && !path.isAbsolute(url.slice(7))) {
 }
 
 async function main() {
+  const guard = remoteWriteGuardError(process.env, "db:migrate");
+  if (guard) {
+    console.error(guard);
+    process.exit(1);
+  }
   const target = process.env.DATABASE_URL;
   if (!target) throw new Error("Thiếu DIRECT_DATABASE_URL hoặc DATABASE_URL");
 

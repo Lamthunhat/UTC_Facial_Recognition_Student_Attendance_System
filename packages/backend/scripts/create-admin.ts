@@ -2,11 +2,13 @@
  * Tạo (hoặc đặt lại mật khẩu) tài khoản Admin đầu tiên trên database thật.
  * Chạy: ADMIN_EMAIL=... ADMIN_NAME="..." ADMIN_PASSWORD=... pnpm admin:create
  * (đọc DATABASE_URL từ apps/web/.env.local hoặc .env ở thư mục gốc nếu chưa đặt ở shell)
+ * DB remote (không phải pglite:/localhost) → bắt buộc CONFIRM_REMOTE_DB=true cho lần chạy đó.
  */
 import { config } from "dotenv";
 import path from "node:path";
 import { sql } from "drizzle-orm";
 import { getDb } from "@utc/database";
+import { remoteWriteGuardError } from "@utc/database/db-target";
 import { users } from "@utc/database/schema";
 import { hashPassword } from "../src/auth/password";
 import { revokeAllSessions } from "../src/auth/session";
@@ -25,6 +27,11 @@ if (url.startsWith("pglite:") && !path.isAbsolute(url.slice(7))) {
 }
 
 async function main() {
+  const guard = remoteWriteGuardError(process.env, "admin:create");
+  if (guard) {
+    console.error(guard);
+    process.exit(1);
+  }
   const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
   const name = process.env.ADMIN_NAME?.trim() || "Quản trị viên";
   const password = process.env.ADMIN_PASSWORD;
