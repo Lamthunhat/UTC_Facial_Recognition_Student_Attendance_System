@@ -32,7 +32,8 @@ pnpm test:e2e                  # Playwright (camera/GPS giả)
 |---|---|---|---|
 | Q1 | Giảng viên tạo lớp 16 tuần | Bị từ chối `DURATION_EXCEEDED` | US1-1 |
 | Q2 | Tải `fixtures/roster-40.xlsx` (1 trùng mã, 1 thiếu tên) | Xem trước báo 2 lỗi; lưu 38 SV | US1, FR-012 |
-| Q3 | Tải `fixtures/roster-ansi.csv`, tiêu đề "MSSV" | Tiếng Việt đúng dấu; cột tự nhận | Edge cases |
+| Q3 | Tải `fixtures/roster-ansi.csv` (Windows-1258), tiêu đề "MSSV" | Tiếng Việt đúng dấu; cột tự nhận. ⚠ Mới kiểm bằng file tạo bằng `iconv`, **chưa thử với file Excel thật** lưu “CSV (Comma delimited)” trên Windows đặt locale tiếng Việt — thử lại khi có máy như vậy | Edge cases |
+| Q3b | Trên Windows tiếng Anh, Excel lưu danh sách bằng “CSV (Comma delimited)” (Windows-1252) rồi tải lên | Cảnh báo “File bị mất dấu tiếng Việt” + hướng dẫn lưu “CSV UTF-8”; dòng có “?” trong họ/tên bị lỗi `LOST_CHARACTERS`, không lưu được. Đã thử bằng Excel 16 (07/11/2026) | Edge cases, FR-012 |
 | Q4 | SV mới đăng nhập → đồng ý → chụp thẻ của chính mình | Thẻ `active`, đọc đúng mã | US6-1 |
 | Q5 | SV A chụp thẻ của SV B | `CODE_MISMATCH` | US6-2 |
 | Q6 | Lớp tiết 1–3: giảng viên mở check-in lúc 7:00 | Có khung check-in 7:00–7:15 và check-out 9:15–9:35; bảng thêm cột "dd/mm · T1–3 · 301-A7" | FR-023, US5-1 |
