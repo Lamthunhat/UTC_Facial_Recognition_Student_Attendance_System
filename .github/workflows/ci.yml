@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Chạy tay từ tab Actions / `gh workflow run CI` (chạy lại CI không cần commit giả)
+  workflow_dispatch:
 
 permissions:
   contents: read
