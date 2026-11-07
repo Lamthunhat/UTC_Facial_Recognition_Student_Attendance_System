@@ -1,6 +1,5 @@
 import "server-only";
 import { existsSync } from "node:fs";
-import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { btree_gist } from "@electric-sql/pglite/contrib/btree_gist";
@@ -9,13 +8,16 @@ import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 import { unaccent } from "@electric-sql/pglite/contrib/unaccent";
 import { vector } from "@electric-sql/pglite-pgvector";
 import { drizzle } from "drizzle-orm/pglite";
+import { pgliteExecutor, runMigrations } from "./migrator";
 import * as schema from "./schema";
 import { seedPeriodsSql } from "./seed/periods";
 
 /**
  * Chế độ chạy thử cục bộ không cần Docker/Supabase: DATABASE_URL=pglite:./.pglite
  * → Postgres nhúng (WASM) chạy trong tiến trình, dữ liệu lưu ở thư mục chỉ định.
- * Lần đầu tự chạy migration + seed tiết/ca. KHÔNG dùng cho production (1 tiến trình, không pooler).
+ * Mỗi lần mở: chạy mọi migration còn thiếu bằng runner dùng chung (migrator.ts) — thêm migration mới KHÔNG cần
+ * xoá thư mục dữ liệu; DB tạo theo cơ chế cũ được baseline tự động. Seed tiết/ca chỉ khi DB vừa được tạo (không ghi
+ * đè bảng tiết Admin đã sửa). KHÔNG dùng cho production (1 tiến trình, không pooler).
  */
 export const LOCAL_PREFIX = "pglite:";
 
@@ -32,14 +34,11 @@ function migrationsDir() {
   return found;
 }
 
-export async function migrateAll(pg: PGlite) {
-  const dir = migrationsDir();
-  const files = (await readdir(dir)).filter((f) => f.endsWith(".sql")).sort();
-  for (const f of files) {
-    const sql = await readFile(path.join(dir, f), "utf8");
-    for (const stmt of sql.split("--> statement-breakpoint")) if (stmt.trim()) await pg.exec(stmt);
-  }
-  await pg.exec(seedPeriodsSql());
+/** Chạy migration còn thiếu; seed tiết/ca nếu lượt này vừa tạo bảng (0000_init). */
+export async function migrateLocal(pg: PGlite) {
+  const r = await runMigrations(pgliteExecutor(pg), { dir: migrationsDir() });
+  if (r.applied.includes("0000_init")) await pg.exec(seedPeriodsSql());
+  return r;
 }
 
 export async function openLocalDb(url: string) {
@@ -48,7 +47,9 @@ export async function openLocalDb(url: string) {
   }
   const dataDir = path.resolve(url.slice(LOCAL_PREFIX.length) || ".pglite");
   const pg = await PGlite.create({ dataDir, extensions: { vector, unaccent, pg_trgm, btree_gist, pgcrypto } });
-  const { rows } = await pg.query<{ ok: string | null }>(`select to_regclass('public.users')::text as ok`);
-  if (!rows[0]?.ok) await migrateAll(pg);
+  const r = await migrateLocal(pg);
+  if (r.baselined.length || r.applied.length) {
+    console.info(`[pglite] ${dataDir}: baseline ${r.baselined.join(", ") || "—"}; đã chạy ${r.applied.join(", ") || "—"}`);
+  }
   return drizzle(pg, { schema });
 }

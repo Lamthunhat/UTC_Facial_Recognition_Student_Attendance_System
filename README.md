@@ -34,7 +34,7 @@ DATABASE_URL=pglite:./.pglite
 JWT_SECRET=<chuỗi ngẫu nhiên ≥ 32 ký tự>
 ```
 
-Postgres nhúng tự tạo bảng + 16 tiết ở lần chạy đầu (dữ liệu lưu trong `apps/web/.pglite`). Tạo tài khoản quản trị đầu tiên (dừng `pnpm dev` trước, vì Postgres nhúng chỉ cho một tiến trình mở; script tự đọc `DATABASE_URL` trong `apps/web/.env.local`):
+Postgres nhúng tự tạo bảng + 16 tiết ở lần chạy đầu (dữ liệu lưu trong `apps/web/.pglite`). Mỗi lần khởi động, app tự chạy các migration còn thiếu — **kéo code có migration mới về thì KHÔNG cần xoá `.pglite`**, dữ liệu dev được giữ nguyên (DB tạo trước khi có cơ chế này cũng được nâng cấp tự động). Muốn chạy migration mà không bật app: dừng `pnpm dev` rồi `pnpm db:migrate`. Tạo tài khoản quản trị đầu tiên (dừng `pnpm dev` trước, vì Postgres nhúng chỉ cho một tiến trình mở; script tự đọc `DATABASE_URL` trong `apps/web/.env.local`):
 
 ```powershell
 $env:ADMIN_EMAIL="admin@utc.edu.vn"; $env:ADMIN_PASSWORD="mat-khau-dai-it-nhat-10"; $env:ADMIN_NAME="Quản trị viên"
@@ -61,7 +61,7 @@ Seed vào một DB khác mà không sửa `.env.local`: đặt `DATABASE_URL` �
 | `pnpm lint` · `pnpm typecheck` | Kiểm tra mã |
 | `pnpm build` | Build Next.js |
 | `pnpm db:generate` | Sinh migration từ `packages/database/src/schema.ts` |
-| `pnpm db:migrate` | Chạy migration + seed 16 tiết / 5 ca vào database trong `DATABASE_URL` |
+| `pnpm db:migrate` | Chạy các migration còn thiếu (mỗi file một transaction, ghi nhận vào bảng theo dõi của Drizzle) cho `pglite:` hoặc Postgres trong `DATABASE_URL`/`DIRECT_DATABASE_URL`; seed 16 tiết / 5 ca khi DB mới tạo. Chạy lại nhiều lần được |
 | `pnpm admin:create` | Tạo/đặt lại tài khoản Admin (`ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME`) |
 | `pnpm db:seed:demo` | Dữ liệu demo cho `pglite:` hoặc Postgres (cần `SEED_ADMIN_PASSWORD`, `SEED_INSTRUCTOR_PASSWORD`; dừng `pnpm dev` nếu dùng pglite) — xem mục Bắt đầu |
 | `pnpm --filter @utc/backend spike:face <ảnh>` | Đo tốc độ nhận diện khuôn mặt |
