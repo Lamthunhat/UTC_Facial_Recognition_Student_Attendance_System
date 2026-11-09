@@ -4,7 +4,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { createWorker, type Worker } from "tesseract.js";
 import { prepareZXingModule, readBarcodes } from "zxing-wasm/reader";
-import { extractStudentCode, pickBarcodeCode, type DecodedCode } from "./verify";
+import { extractStudentCode, ocrNameLine, pickBarcodeCode, type DecodedCode } from "./verify";
 
 /**
  * T057 — Đọc thẻ sinh viên ở server (Principle I, research R3), chạy hoàn toàn cục bộ:
@@ -30,7 +30,10 @@ function ensureZxing() {
 
 const BARCODE_FORMATS = ["Code128", "Code39", "Code93", "EAN13", "ITF", "Codabar", "QRCode"] as const;
 
-/** Nội dung các mã vạch hợp lệ trên ảnh; thử ảnh gốc, ảnh xám tăng tương phản, ảnh phóng to. */
+/**
+ * Nội dung các mã vạch hợp lệ trên ảnh; thử ảnh xám, ảnh tăng tương phản, ảnh phóng to (theo cạnh dài).
+ * Thẻ SV UTC là thẻ DỌC: mã vạch có thể nằm ngang hoặc dọc trong ảnh → tryRotate; tryInvert cho mã in sáng trên nền tối.
+ */
 export async function readBarcodeTexts(img: Buffer): Promise<string[]> {
   await ensureZxing();
   const meta = await sharp(img).metadata();
@@ -38,12 +41,17 @@ export async function readBarcodeTexts(img: Buffer): Promise<string[]> {
     async () => sharp(img).greyscale().png().toBuffer(),
     async () => sharp(img).greyscale().normalise().sharpen().png().toBuffer(),
   ];
-  if ((meta.width ?? 0) < 1600) variants.push(async () => sharp(img).resize({ width: 2000 }).greyscale().png().toBuffer());
+  const longEdge = Math.max(meta.width ?? 0, meta.height ?? 0);
+  if (longEdge < 1600) {
+    const size = (meta.width ?? 0) >= (meta.height ?? 0) ? { width: 2000 } : { height: 2000 };
+    variants.push(async () => sharp(img).resize(size).greyscale().png().toBuffer());
+  }
   const found = new Set<string>();
   for (const make of variants) {
     const results = await readBarcodes(new Uint8Array(await make()), {
       tryHarder: true,
       tryRotate: true,
+      tryInvert: true,
       formats: [...BARCODE_FORMATS],
       maxNumberOfSymbols: 3,
     });
@@ -66,18 +74,38 @@ function ocrWorker() {
   return worker;
 }
 
-/** Toàn bộ chữ OCR được trên ảnh thẻ (ảnh xám, tăng tương phản, cạnh dài ≥ 1600 px). */
-export async function ocrText(img: Buffer): Promise<string> {
-  const meta = await sharp(img).metadata();
-  const prepared = await sharp(img)
-    .resize((meta.width ?? 0) < 1600 ? { width: 1600 } : undefined)
+/** Toàn bộ chữ OCR được trên ảnh thẻ (ảnh xám, tăng tương phản, cạnh dài ≥ 1600 px), tuỳ chọn xoay trước. */
+export async function ocrText(img: Buffer, rotate: 0 | 90 | 270 = 0): Promise<string> {
+  const rotated = rotate ? await sharp(img).rotate(rotate).toBuffer() : img;
+  const meta = await sharp(rotated).metadata();
+  const w = meta.width ?? 0;
+  const h = meta.height ?? 0;
+  const prepared = await sharp(rotated)
+    .resize(Math.max(w, h) < 1600 ? (w >= h ? { width: 1600 } : { height: 1600 }) : undefined)
     .greyscale()
     .normalise()
     .png()
     .toBuffer();
-  const w = await ocrWorker();
-  const { data } = await w.recognize(prepared);
+  const worker = await ocrWorker();
+  const { data } = await worker.recognize(prepared);
   return data.text.normalize("NFC");
+}
+
+/** Chữ OCR có dùng được không: thấy mã SV hoặc nhãn họ tên. */
+const usefulText = (text: string) => !!extractStudentCode(text) || ocrNameLine(text) !== null;
+
+/**
+ * OCR có xoay thử: ảnh thẻ dọc có thể bị chụp/xoay nằm ngang. Lần đầu không thấy mã hay họ tên → xoay 90°, rồi 270°.
+ * Trả chữ của lần đầu tiên dùng được (không được thì chữ của lần đầu).
+ */
+export async function ocrTextAnyOrientation(img: Buffer): Promise<string> {
+  const first = await ocrText(img);
+  if (usefulText(first)) return first;
+  for (const angle of [90, 270] as const) {
+    const t = await ocrText(img, angle);
+    if (usefulText(t)) return t;
+  }
+  return first;
 }
 
 /** Giải phóng worker OCR (test, tắt instance). */
@@ -92,7 +120,7 @@ export async function closeOcr() {
  * Luôn trả kèm chữ OCR để so họ tên (nameAppearsIn).
  */
 export async function decodeCard(img: Buffer): Promise<{ decoded: DecodedCode | null; text: string }> {
-  const [barcodes, text] = await Promise.all([readBarcodeTexts(img), ocrText(img)]);
+  const [barcodes, text] = await Promise.all([readBarcodeTexts(img), ocrTextAnyOrientation(img)]);
   const fromBarcode = pickBarcodeCode(barcodes);
   if (fromBarcode) return { decoded: { code: fromBarcode, method: "barcode" }, text };
   const fromText = extractStudentCode(text);

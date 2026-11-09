@@ -31,6 +31,28 @@ async function syntheticCard(opts: { code: string; name: string; barcode?: boole
   return sharp(Buffer.from(svg)).composite(layers).jpeg({ quality: 85 }).toBuffer();
 }
 
+/** Thẻ GIẢ DỌC kiểu thẻ SV UTC (CR80 54 × 85,6 → 630 × 1000 px): ảnh chân dung trên, chữ ngang, mã vạch ngang hoặc dọc. */
+async function portraitCard(opts: { code: string; name: string; barcode: "horizontal" | "vertical" | "none" | "blurred" }) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="630" height="1000">
+    <rect width="100%" height="100%" fill="#f4f7fb"/>
+    <text x="40" y="60" font-family="Arial" font-size="26" font-weight="bold">TRƯỜNG ĐH GIAO THÔNG VẬN TẢI</text>
+    <rect x="195" y="100" width="240" height="300" fill="#cfd8e3"/>
+    <text x="40" y="470" font-family="Arial" font-size="32">Họ tên: ${opts.name}</text>
+    <text x="40" y="530" font-family="Arial" font-size="32">MSSV: ${opts.code}</text>
+  </svg>`;
+  const layers: OverlayOptions[] = [];
+  if (opts.barcode !== "none") {
+    const bc = await writeBarcode(opts.code, { format: "Code128", scale: 3 });
+    let png = Buffer.from(await bc.image!.arrayBuffer());
+    if (opts.barcode === "blurred") png = await sharp(png).blur(12).toBuffer();
+    if (opts.barcode === "vertical") png = await sharp(png).rotate(90).toBuffer();
+    const m = await sharp(png).metadata();
+    // ngang: dưới chữ; dọc: sát mép phải, nửa dưới thẻ
+    layers.push(opts.barcode === "vertical" ? { input: png, left: 630 - (m.width ?? 0) - 20, top: 560 } : { input: png, left: Math.round((630 - (m.width ?? 0)) / 2), top: 600 });
+  }
+  return sharp(Buffer.from(svg)).composite(layers).jpeg({ quality: 88 }).toBuffer();
+}
+
 beforeAll(async () => {
   const wasm = await readFile(require.resolve("zxing-wasm/writer/zxing_writer.wasm"));
   await prepareZXingModule({ overrides: { wasmBinary: wasm.buffer as ArrayBuffer }, fireImmediately: true });
@@ -61,6 +83,26 @@ describe("decode thẻ (chạy thật, cục bộ)", () => {
     const r = await decodeCard(await syntheticCard({ code: "231230802", name: "TRẦN THỊ BÌNH", blurBarcode: true }));
     expect(r.decoded).toEqual({ code: "231230802", method: "ocr" });
   }, 60_000);
+
+  it("thẻ DỌC: mã vạch nằm ngang đọc được", async () => {
+    expect(await readBarcodeTexts(await portraitCard({ code: "231230811", name: "LÊ VĂN LÂM", barcode: "horizontal" }))).toContain("231230811");
+  }, 60_000);
+
+  it("thẻ DỌC: mã vạch nằm dọc (xoay 90°) vẫn đọc được (tryRotate)", async () => {
+    expect(await readBarcodeTexts(await portraitCard({ code: "231230812", name: "PHAN THỊ PHƯƠNG", barcode: "vertical" }))).toContain("231230812");
+  }, 60_000);
+
+  it("ảnh thẻ DỌC bị xoay nằm ngang cả thẻ: mã vạch vẫn đọc được", async () => {
+    const card = await sharp(await portraitCard({ code: "231230813", name: "NGÔ THỊ LINH", barcode: "horizontal" })).rotate(90).jpeg().toBuffer();
+    expect(await readBarcodeTexts(card)).toContain("231230813");
+  }, 60_000);
+
+  it("thẻ DỌC xoay 90° + mã vạch mờ → OCR xoay ảnh thử lại, đọc được mã và họ tên (method=ocr)", async () => {
+    const card = await sharp(await portraitCard({ code: "231230814", name: "NGUYỄN VĂN AN", barcode: "blurred" })).rotate(90).jpeg().toBuffer();
+    const r = await decodeCard(card);
+    expect(r.decoded).toEqual({ code: "231230814", method: "ocr" });
+    expect(nameAppearsIn(r.text, "Nguyễn Văn An"), r.text).toBe(true);
+  }, 120_000);
 
   it("ảnh không có chữ hay mã vạch → decoded null", async () => {
     const blank = await sharp({ create: { width: 800, height: 500, channels: 3, background: "#888" } }).jpeg().toBuffer();
