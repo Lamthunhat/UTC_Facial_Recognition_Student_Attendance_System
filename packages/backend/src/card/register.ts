@@ -15,7 +15,8 @@ import { consumeNonce, issueNonce } from "../security/nonce";
 import { enforce, hit, RULES } from "../security/rate-limit";
 import { sanitizeImage, UploadError } from "../security/upload";
 import { requireConsent } from "../student/consent";
-import { decodeCard } from "./decode";
+import { decodeCard, type DecodeStats } from "./decode";
+import { stepTimer } from "./step-timer";
 import { analyzePortraits, type AnalyzedPortraits } from "./portrait";
 import { cardPurgeAfter } from "./retention";
 import { duplicateDecision, evaluateCard, nameAppearsIn, ocrNameLine, type CardRejectCode, type CardReviewReason, type DecodedCode } from "./verify";
@@ -38,7 +39,7 @@ export interface CardStorage {
   signedUrl(bucket: Bucket, path: string): Promise<string>;
 }
 export interface CardDeps {
-  decode(jpeg: Buffer): Promise<{ decoded: DecodedCode | null; text: string }>;
+  decode(jpeg: Buffer): Promise<{ decoded: DecodedCode | null; text: string; stats?: DecodeStats }>;
   analyzeFaces(jpeg: Buffer): Promise<AnalyzedPortraits>;
   /** Phân tích một khung mặt trực tiếp (cùng pipeline ONNX; tách riêng để test giả lập từng khung). */
   analyzeLive(jpeg: Buffer): Promise<AnalyzedPortraits>;
@@ -139,11 +140,15 @@ export async function registerCard(
   const attempt = await hit(`card:${studentId}`, RULES.cardRegister);
   const remainingAttempts = Math.max(0, RULES.cardRegister.limit - attempt.count);
   if (!attempt.allowed) throw tooManyRequests(attempt.retryAfterSec, { remainingAttempts: 0 });
+  // Thời gian từng bước — chỉ log ở dev (đo hiệu năng cục bộ; production không ghi)
+  const timer: ReturnType<typeof stepTimer> & { decodeStats?: DecodeStats } = stepTimer();
   try {
-    return await processCard(session, studentId, input, challenge);
+    return await processCard(session, studentId, input, challenge, timer);
   } catch (e) {
     if (e instanceof HttpError && e.status < 500) throw e.withExtra({ remainingAttempts });
     throw e;
+  } finally {
+    if (process.env.NODE_ENV === "development") log.info("card_register_timing", { ms: timer.done(), decode: timer.decodeStats });
   }
 }
 
@@ -152,6 +157,7 @@ async function processCard(
   studentId: string,
   input: { nonce: string; image: Buffer; frames: Buffer[] },
   challenge: Challenge,
+  timer: ReturnType<typeof stepTimer> & { decodeStats?: DecodeStats },
 ): Promise<{ status: "active" | "pending_review"; decodedCode: string }> {
   if (input.frames.length !== LIVE_FRAME_COUNT) {
     throw new HttpError(422, "VALIDATION_ERROR", "Cần đúng 3 khung hình khuôn mặt theo hướng dẫn.");
@@ -170,6 +176,7 @@ async function processCard(
     throw e;
   }
 
+  timer.mark("sanitize");
   const db = await getDb();
   const [me] = await db
     .select({ code: students.studentCode, lastName: students.lastName, firstName: students.firstName })
@@ -178,7 +185,9 @@ async function processCard(
     .limit(1);
   if (!me) throw new HttpError(401, "UNAUTHORIZED", "Bạn cần đăng nhập.");
 
-  const [{ decoded, text }, portraits] = await Promise.all([deps.decode(jpeg), deps.analyzeFaces(jpeg)]);
+  const [{ decoded, text, stats }, portraits] = await Promise.all([deps.decode(jpeg), deps.analyzeFaces(jpeg)]);
+  timer.decodeStats = stats;
+  timer.mark("decode_and_portrait");
   const nameMatched = text.trim() ? nameAppearsIn(text, `${me.lastName} ${me.firstName}`) : null;
   const verdict = evaluateCard({ sessionCode: me.code, decoded, faces: portraits.faces, nameMatched });
   if (!verdict.ok) throw new HttpError(422, verdict.error, REJECT_MESSAGES[verdict.error]);
@@ -195,6 +204,7 @@ async function processCard(
     throw new HttpError(422, "LIVENESS_FAILED", LIVE_MESSAGES.LIVENESS_FAILED);
   }
 
+  timer.mark("liveness");
   const embedding = await portraits.embed(verdict.faceIndex);
   if (embedding.length !== 512) throw new Error(`Embedding sai số chiều: ${embedding.length}`);
   const portrait = await portraits.crop(verdict.faceIndex);
@@ -226,6 +236,7 @@ async function processCard(
   const cardPath = `${studentId}/${cardId}/card.jpg`;
   const portraitPath = `${studentId}/${cardId}/portrait.jpg`;
 
+  timer.mark("match");
   const uploaded: string[] = [];
   try {
     uploaded.push(await deps.storage.upload("cards", cardPath, jpeg, "image/jpeg"));
@@ -260,6 +271,7 @@ async function processCard(
     throw e;
   }
   // Không trả lý do chờ duyệt cho SV (không lộ là mặt trùng với ai) — chỉ giảng viên xem (card/admin.ts).
+  timer.mark("save");
   return { status, decodedCode: decoded!.code };
 }
 

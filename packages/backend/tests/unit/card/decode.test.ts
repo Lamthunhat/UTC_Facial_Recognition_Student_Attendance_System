@@ -102,6 +102,16 @@ describe("decode thẻ (chạy thật, cục bộ)", () => {
     const r = await decodeCard(card);
     expect(r.decoded).toEqual({ code: "231230814", method: "ocr" });
     expect(nameAppearsIn(r.text, "Nguyễn Văn An"), r.text).toBe(true);
+    expect(r.stats.ocrRotations).toBeGreaterThanOrEqual(1);
+  }, 120_000);
+
+  it("mã vạch đọc được → KHÔNG chạy OCR xoay (kể cả thẻ nằm ngang, chữ OCR lần đầu vô dụng); có thời gian từng bước", async () => {
+    const card = await sharp(await portraitCard({ code: "231230815", name: "ĐỖ HỮU KHÁNH", barcode: "horizontal" })).rotate(90).jpeg().toBuffer();
+    const r = await decodeCard(card);
+    expect(r.decoded).toEqual({ code: "231230815", method: "barcode" });
+    expect(r.stats.ocrRotations).toBe(0);
+    expect(r.stats.barcodeMs).toBeGreaterThanOrEqual(0);
+    expect(r.stats.ocrMs).toBeGreaterThanOrEqual(0);
   }, 120_000);
 
   it("ảnh không có chữ hay mã vạch → decoded null", async () => {

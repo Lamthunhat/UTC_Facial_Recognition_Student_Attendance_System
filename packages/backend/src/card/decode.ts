@@ -95,17 +95,25 @@ export async function ocrText(img: Buffer, rotate: 0 | 90 | 270 = 0): Promise<st
 const usefulText = (text: string) => !!extractStudentCode(text) || ocrNameLine(text) !== null;
 
 /**
- * OCR có xoay thử: ảnh thẻ dọc có thể bị chụp/xoay nằm ngang. Lần đầu không thấy mã hay họ tên → xoay 90°, rồi 270°.
- * Trả chữ của lần đầu tiên dùng được (không được thì chữ của lần đầu).
+ * OCR xoay thử (ảnh thẻ dọc có thể bị chụp/xoay nằm ngang): `first` (chữ lần đầu, ảnh gốc) không thấy mã hay họ tên
+ * → xoay 90°, rồi 270°. Trả chữ của lần đầu tiên dùng được (không được thì `first`) + số lần đã xoay.
  */
-export async function ocrTextAnyOrientation(img: Buffer): Promise<string> {
-  const first = await ocrText(img);
-  if (usefulText(first)) return first;
+export async function ocrRotateRetry(img: Buffer, first: string): Promise<{ text: string; rotations: number }> {
+  if (usefulText(first)) return { text: first, rotations: 0 };
+  let rotations = 0;
   for (const angle of [90, 270] as const) {
+    rotations++;
     const t = await ocrText(img, angle);
-    if (usefulText(t)) return t;
+    if (usefulText(t)) return { text: t, rotations };
   }
-  return first;
+  return { text: first, rotations };
+}
+
+export interface DecodeStats {
+  barcodeMs: number;
+  ocrMs: number;
+  /** Số lần OCR lại với ảnh xoay (chỉ khi KHÔNG đọc được mã vạch). */
+  ocrRotations: number;
 }
 
 /** Giải phóng worker OCR (test, tắt instance). */
@@ -117,12 +125,22 @@ export async function closeOcr() {
 
 /**
  * Đọc mã SV trên thẻ: mã vạch trước (tin cậy), không được thì lấy từ chữ OCR (method = "ocr").
- * Luôn trả kèm chữ OCR để so họ tên (nameAppearsIn).
+ * Mã vạch và OCR lần đầu chạy song song; OCR xoay ảnh CHỈ chạy khi không đọc được mã vạch (tiết kiệm thời gian).
+ * Luôn trả kèm chữ OCR để so họ tên (nameAppearsIn) + thời gian từng bước.
  */
-export async function decodeCard(img: Buffer): Promise<{ decoded: DecodedCode | null; text: string }> {
-  const [barcodes, text] = await Promise.all([readBarcodeTexts(img), ocrTextAnyOrientation(img)]);
+export async function decodeCard(img: Buffer): Promise<{ decoded: DecodedCode | null; text: string; stats: DecodeStats }> {
+  const t0 = performance.now();
+  let barcodeMs = 0;
+  let ocrMs = 0;
+  const [barcodes, first] = await Promise.all([
+    readBarcodeTexts(img).finally(() => (barcodeMs = Math.round(performance.now() - t0))),
+    ocrText(img).finally(() => (ocrMs = Math.round(performance.now() - t0))),
+  ]);
   const fromBarcode = pickBarcodeCode(barcodes);
-  if (fromBarcode) return { decoded: { code: fromBarcode, method: "barcode" }, text };
+  if (fromBarcode) return { decoded: { code: fromBarcode, method: "barcode" }, text: first, stats: { barcodeMs, ocrMs, ocrRotations: 0 } };
+  const t1 = performance.now();
+  const { text, rotations } = await ocrRotateRetry(img, first);
+  ocrMs += Math.round(performance.now() - t1);
   const fromText = extractStudentCode(text);
-  return { decoded: fromText ? { code: fromText, method: "ocr" } : null, text };
+  return { decoded: fromText ? { code: fromText, method: "ocr" } : null, text, stats: { barcodeMs, ocrMs, ocrRotations: rotations } };
 }
