@@ -21,10 +21,7 @@ export default function StudentCardPage() {
   const load = useCallback(() => {
     setError(null);
     api<{ card: Card }>("/api/student/card")
-      .then((r) => {
-        setCard(r.card);
-        setRegistering(false);
-      })
+      .then((r) => setCard(r.card))
       .catch((e) => {
         if (e instanceof ApiError && e.code === "CONSENT_REQUIRED") return router.replace("/sv/dong-y?next=/sv/the-sinh-vien");
         if (e instanceof ApiError && e.status === 401) return router.replace("/sv?next=/sv/the-sinh-vien");
@@ -51,7 +48,15 @@ export default function StudentCardPage() {
           )}
         </CardStatusBanner>
       )}
-      {registering && <CardRegistration onFinished={load} />}
+      {registering && (
+        <CardRegistration
+          onFinished={() => {
+            // Chỉ đóng luồng đăng ký khi nó kết thúc — không đóng khi một lần tải trạng thái về muộn
+            setRegistering(false);
+            load();
+          }}
+        />
+      )}
     </section>
   );
 }

@@ -122,11 +122,11 @@ export default function ClassCardsPage() {
       if (action.kind === "reset") await api(`${base}/reset`, { method: "POST", json: { reason: text } });
       else await api(`${base}/review`, { method: "POST", json: { decision: action.kind, ...(text ? { note: text } : {}) } });
       const verb = action.kind === "approve" ? "Đã duyệt" : action.kind === "reject" ? "Đã từ chối" : "Đã đặt lại";
-      setNotice(`${verb} thẻ của ${action.row.fullName} (${action.row.code}).`);
       setAction(null);
       setOpenId(null);
       setDetail(null);
-      await load();
+      await load(); // báo thành công sau khi danh sách đã cập nhật — không hiện trạng thái cũ cạnh thông báo mới
+      setNotice(`${verb} thẻ của ${action.row.fullName} (${action.row.code}).`);
     } catch (e) {
       setActionError(e instanceof ApiError && e.status !== 0 ? e.message : "Không kết nối được máy chủ.");
     } finally {
