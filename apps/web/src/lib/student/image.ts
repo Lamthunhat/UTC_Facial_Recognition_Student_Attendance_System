@@ -49,6 +49,29 @@ export function requestFits(sizes: number[]): boolean {
   return sizes.reduce((a, b) => a + b, 0) + MULTIPART_OVERHEAD <= REQUEST_MAX_BYTES;
 }
 
+/** Thẻ SV UTC là thẻ DỌC theo chuẩn CR80 (54 × 85,6 mm): rộng / cao. */
+export const CARD_ASPECT = 54 / 85.6;
+/** Cạnh dài tối thiểu của vùng thẻ cắt ra (điểm ảnh gốc của camera) — thấp hơn thì OCR/mã vạch khó đọc. */
+export const CARD_MIN_LONG_EDGE = 1000;
+
+/**
+ * Khung hướng dẫn thẻ dọc trong vùng xem trước (toạ độ màn hình): cao 80 % vùng xem, đúng tỉ lệ CR80, căn giữa;
+ * vùng xem quá hẹp thì thu theo chiều ngang (≤ 92 % chiều rộng). Dùng chung cho điện thoại dọc và webcam ngang.
+ */
+export function cardGuideRect(viewW: number, viewH: number) {
+  let height = viewH * 0.8;
+  let width = height * CARD_ASPECT;
+  if (width > viewW * 0.92) {
+    width = viewW * 0.92;
+    height = width / CARD_ASPECT;
+  }
+  return { x: (viewW - width) / 2, y: (viewH - height) / 2, width, height };
+}
+
+export function cropLongEdgeOk(crop: { width: number; height: number }, min = CARD_MIN_LONG_EDGE) {
+  return Math.max(crop.width, crop.height) >= min;
+}
+
 /**
  * Khung hướng dẫn vẽ trên màn hình (video `object-fit: cover`) → vùng cắt tương ứng trên ảnh gốc của video,
  * nới thêm `margin` (tỉ lệ) mỗi phía để không cắt sát mép thẻ; kẹp trong ảnh.

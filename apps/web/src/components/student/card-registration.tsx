@@ -136,7 +136,7 @@ export function CardRegistration({ onFinished }: { onFinished: () => void }) {
           <p className="text-sm">Kiểm tra ảnh: thấy rõ <strong>mã sinh viên, họ tên và ảnh chân dung</strong>, không bị loá hay mờ.</p>
           {previewUrl && (
             // eslint-disable-next-line @next/next/no-img-element -- blob: URL cục bộ, không qua next/image
-            <img src={previewUrl} alt="Ảnh thẻ vừa chụp" className="w-full rounded-lg border border-border" />
+            <img src={previewUrl} alt="Ảnh thẻ vừa chụp" className="mx-auto max-h-[60dvh] w-auto max-w-full rounded-lg border border-border" />
           )}
           <div className="flex gap-2">
             <Button variant="outline" className="flex-1" onClick={() => dispatch({ type: "CARD_RETAKE" })}>

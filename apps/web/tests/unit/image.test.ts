@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compressImage, fitWithin, guideCrop, requestFits, CARD_IMAGE, FACE_FRAME, REQUEST_MAX_BYTES } from "@/lib/student/image";
+import { cardGuideRect, CARD_ASPECT, CARD_MIN_LONG_EDGE, compressImage, cropLongEdgeOk, fitWithin, guideCrop, requestFits, CARD_IMAGE, FACE_FRAME, REQUEST_MAX_BYTES } from "@/lib/student/image";
 
 /** Nén ảnh ở trình duyệt: thuật toán thuần, bộ mã hoá JPEG được truyền vào (trình duyệt dùng canvas). */
 describe("fitWithin — cạnh dài tối đa, giữ tỉ lệ, không phóng to", () => {
@@ -86,5 +86,61 @@ describe("guideCrop — vùng khung hướng dẫn (toạ độ màn hình, vide
   it("có lề + kẹp trong ảnh video", () => {
     const r = guideCrop({ videoW: 1000, videoH: 600, viewW: 1000, viewH: 600 }, { x: 0, y: 0, width: 1000, height: 600 }, 0.1);
     expect(r).toEqual({ x: 0, y: 0, width: 1000, height: 600 });
+  });
+});
+
+describe("cardGuideRect — khung hướng dẫn thẻ DỌC (CR80 54 × 85,6), căn giữa, cao ~80 % vùng xem trước", () => {
+  const ratio = (r: { width: number; height: number }) => r.width / r.height;
+
+  it("tỉ lệ khung = 54 : 85,6", () => {
+    expect(CARD_ASPECT).toBeCloseTo(54 / 85.6, 6);
+  });
+
+  it("điện thoại cầm dọc (vùng xem 3:4): cao 80 %, đúng tỉ lệ, căn giữa", () => {
+    const r = cardGuideRect(358, 477);
+    expect(r.height).toBeCloseTo(477 * 0.8, 6);
+    expect(ratio(r)).toBeCloseTo(CARD_ASPECT, 6);
+    expect(r.x + r.width / 2).toBeCloseTo(358 / 2, 6);
+    expect(r.y + r.height / 2).toBeCloseTo(477 / 2, 6);
+  });
+
+  it("máy tính (vùng xem 16:9, webcam ngang): vẫn là khung DỌC, cao 80 %, không méo", () => {
+    const r = cardGuideRect(960, 540);
+    expect(r.height).toBeCloseTo(432, 6);
+    expect(r.height).toBeGreaterThan(r.width);
+    expect(ratio(r)).toBeCloseTo(CARD_ASPECT, 6);
+  });
+
+  it("vùng xem quá hẹp: thu theo chiều ngang (≤ 92 %), vẫn giữ tỉ lệ", () => {
+    const r = cardGuideRect(200, 900);
+    expect(r.width).toBeCloseTo(184, 6);
+    expect(ratio(r)).toBeCloseTo(CARD_ASPECT, 6);
+  });
+});
+
+describe("vùng cắt theo khung dọc → ảnh gửi đi đúng tỉ lệ thẻ, cạnh dài ≥ 1000 px", () => {
+  const ar = (c: { width: number; height: number }) => c.width / c.height;
+
+  it("điện thoại dọc, luồng camera dọc 1440×2560: cắt ra ảnh dọc đúng tỉ lệ, cạnh dài ≥ 1000 px", () => {
+    const view = { viewW: 358, viewH: 477 };
+    const crop = guideCrop({ videoW: 1440, videoH: 2560, ...view }, cardGuideRect(view.viewW, view.viewH));
+    expect(ar(crop)).toBeCloseTo(CARD_ASPECT, 2);
+    expect(Math.max(crop.width, crop.height)).toBeGreaterThanOrEqual(CARD_MIN_LONG_EDGE);
+    expect(cropLongEdgeOk(crop)).toBe(true);
+  });
+
+  it("webcam ngang 1920×1080 trong vùng xem 16:9: cắt ra ảnh DỌC đúng tỉ lệ (không phải cả khung hình)", () => {
+    const view = { viewW: 960, viewH: 540 };
+    const crop = guideCrop({ videoW: 1920, videoH: 1080, ...view }, cardGuideRect(view.viewW, view.viewH));
+    expect(crop.height).toBeGreaterThan(crop.width);
+    expect(ar(crop)).toBeCloseTo(CARD_ASPECT, 2);
+    expect(crop.width).toBeLessThan(1920 / 2);
+  });
+
+  it("webcam 1280×720: cạnh dài sau cắt < 1000 px → nhắc (cropLongEdgeOk = false)", () => {
+    const view = { viewW: 960, viewH: 540 };
+    const crop = guideCrop({ videoW: 1280, videoH: 720, ...view }, cardGuideRect(view.viewW, view.viewH));
+    expect(Math.max(crop.width, crop.height)).toBeLessThan(CARD_MIN_LONG_EDGE);
+    expect(cropLongEdgeOk(crop)).toBe(false);
   });
 });
