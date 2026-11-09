@@ -2,7 +2,7 @@
 
 ## Trạng thái & quy ước
 
-*Cập nhật 2026-11-08. Đọc file này trước khi làm tiếp; kiểm lại repo nếu nghi ngờ thông tin đã cũ.*
+*Cập nhật 2026-11-10. Đọc file này trước khi làm tiếp; kiểm lại repo nếu nghi ngờ thông tin đã cũ.*
 
 ### 1. Dự án
 - Hệ thống điểm danh sinh viên Trường ĐH Giao thông Vận tải (UTC) bằng khuôn mặt + GPS; giao diện tiếng Việt.
@@ -25,11 +25,11 @@
 | 1 Setup | 8/8 | |
 | 1b Spike | 0/4 | T009 còn đo trên Vercel; T010 mới 1/5 thẻ thật (Code128 = mã SV); T011 hiệu chỉnh ngưỡng; T012 Go/No-Go |
 | 2 Foundational | 27/27 | |
-| 3 US1 lớp + danh sách | 13/13 | Đã trên `main` |
-| 4 US6 thẻ SV | 10/12 | Backend xong (T053–T061, T064); **UI T062, T063 chưa làm** |
+| 3 US1 lớp + danh sách | 13/13 | |
+| 4 US6 thẻ SV | 12/12 | Backend trên `main` (PR #1); UI T062/T063 trên nhánh `001-us6-ui` (PR #2) |
 | 5–11 (US2, US3, US5, US4, US9, US8, US7) | 0 | |
 | 12 Polish | 0/14 | Có T144 (Turnstile) |
-- Test (lần chạy gần nhất): backend **401**, database **50**, shared **22** — tổng 473, đều pass. `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm check:traces` pass.
+- Test (lần chạy gần nhất): backend **419**, database **51**, shared **22**, web **37** (`apps/web/tests/unit`, vitest) — tổng 529, đều pass. `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm check:traces` pass.
 
 ### 4. Quyết định đã chốt
 - Body request ≤ **4 MB** (giới hạn 4,5 MB của Vercel): danh sách lớp 4 MB, ảnh thẻ 1 MB, mỗi khung mặt 1 MB (FR-090, FR-100, research R14).
@@ -44,10 +44,12 @@
 - Script ghi DB (`packages/database/src/db-target.ts`): `db:seed:demo` **chỉ DB cục bộ** (cấm production/Supabase/remote); `db:migrate`, `admin:create` lên remote cần `CONFIRM_REMOTE_DB=true`.
 - Đóng gói Vercel: `next.config.ts` phân giải đường dẫn thật của wasm/dữ liệu OCR; `pnpm check:traces` chạy trong CI và trong `buildCommand`.
 - Biến môi trường kiểm **lúc khởi động** (`apps/web/src/instrumentation.ts` → `checkEnvOnStartup` trong `packages/backend/src/startup.ts`, chỉ runtime nodejs; không chạy lúc `next build`): thiếu/sai → log `env_invalid` chỉ tên biến, mọi request 500 (Next 15 không thoát tiến trình). `pglite:` chỉ bắt buộc `DATABASE_URL`, `JWT_SECRET`, `LOG_HMAC_SECRET`; `VERCEL=1` + `pglite:` **luôn bị chặn**; `NODE_ENV=production` + `pglite:` (vd. `next start` cục bộ) chỉ chạy khi `ALLOW_LOCAL_PGLITE=1` (log warn `pglite_production_local`); Postgres bắt buộc thêm `SUPABASE_*`, `CRON_SECRET`.
+- UI thẻ SV (T062/T063): logic thuần trong `apps/web/src/lib/student/*` (có test): nén ảnh (thẻ cạnh dài 1600 px ≤ 1 MB, khung mặt 1280 px ≤ 0,9 MB → tổng ≤ 4 MB), mã lỗi → hướng dẫn (mã lạ → thông báo chung), máy trạng thái `card-flow.ts` (bỏ khung mặt khỏi state khi gửi). Camera: `components/camera/use-camera.ts` tắt track khi gỡ/ẩn trang/pagehide, bỏ luồng về muộn (số thứ tự yêu cầu). Fallback `<input capture>` **chỉ trên thiết bị cảm ứng** (FR-045). SV chỉ thấy trạng thái thẻ (`active`/`pending_review`/`rejected`/`reset`), không bao giờ thấy lý do.
+- Kho ảnh dev: `DATABASE_URL=pglite:` + không `SUPABASE_URL` + không Vercel → `.local-storage/` (gitignore), signed URL = `data:`. `student_cards.ocr_name` chỉ lưu khi NAME_MISMATCH (migration 0004).
 - CodeQL: repo private → `upload: never` + `.github/scripts/codeql-gate.mjs` chặn theo SARIF.
 
 ### 5. Đang dở
-- **PR #1** (`001-attendance-core` → `main`) đã mở, **chưa merge**; Vercel Preview build thành công.
+- PR #1 (US1 + backend US6 + hạ tầng deploy) **đã merge vào `main`**. **PR #2** (`001-us6-ui` → `main`, UI US6) đã mở, chưa merge.
 - **CI không tự chạy — đã tự hết** (kiểm 2026-11-09): push `e75198e` lên nhánh PR → `ping` tự chạy cả `push` lẫn `pull_request`, `CI` tự chạy `pull_request`. Sự cố 2026-11-07 (4 lần push `main` không sinh run) nghi phía GitHub với repo mới; `ci.yml` đúng cú pháp (`push: branches: [main]`, `pull_request:` mọi nhánh, `workflow_dispatch:`). Push lên nhánh tính năng chỉ chạy CI qua `pull_request` khi có PR mở — đúng thiết kế. `ping.yml` đã xoá. Chạy tay vẫn được: `gh workflow run CI --ref <nhánh>`.
 - Kiểm Preview cần `$env:VERCEL_BYPASS` (Preview có Deployment Protection, trả 302 sang SSO).
 - `LOG_HMAC_SECRET`: đã có ở `apps/web/.env.local`; **cần đặt trên Vercel** (Preview + Production) — thiếu thì server không khởi động.
@@ -56,9 +58,9 @@
 - Token `gh` thiếu quyền `workflow` → push sửa `ci.yml` phải qua Git Credential Manager (hoặc `gh auth refresh -s workflow`).
 
 ### 6. Việc tiếp theo (theo thứ tự)
-1. Xử lý các mục §5 → merge PR #1.
-2. US6 UI T062/T063: đăng nhập SV, đồng ý điều khoản, chụp thẻ (camera sau) + mặt trực tiếp (camera trước) theo thử thách, trạng thái thẻ; hàng chờ duyệt cho giảng viên `/gv/lop/[id]/the`. **Không bao giờ lộ `DUPLICATE_FACE` hay lý do chờ duyệt cho SV.**
-3. Phase 5 US2 check-in.
+1. Thử UI US6 trên điện thoại thật (Android Chrome, iOS Safari) với thẻ + mặt thật (chỉ cục bộ, không lưu ảnh) → merge PR #2.
+2. Xử lý các mục §5 (Preview, đo đăng ký thẻ, tách Supabase).
+3. Phase 5 US2 check-in (dùng lại `use-camera`, `FaceChallenge`, `card-errors`).
 4. Polish: T144 Turnstile khi vượt ngưỡng IP; nâng các action Node 20 (`checkout`, `setup-node`, `codeql-action`…); cron dọn ảnh hết hạn; cảnh báo `jose` (Edge runtime) ở middleware.
 
 ### 7. Quy ước làm việc

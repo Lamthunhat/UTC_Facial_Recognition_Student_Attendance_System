@@ -37,7 +37,7 @@ LOG_HMAC_SECRET=<chuỗi ngẫu nhiên ≥ 32 ký tự, khác JWT_SECRET>
 
 Server kiểm biến môi trường lúc khởi động: thiếu/sai thì log `env_invalid` kèm tên biến và mọi request trả 500. Với `DATABASE_URL=pglite:` chỉ ba biến trên là bắt buộc, và `pglite:` luôn bị chặn trên Vercel. Chạy bản build production cục bộ trên pglite (`pnpm build` rồi `next start`, ví dụ để đo hiệu năng) phải bật riêng cho lần chạy đó — PowerShell `$env:ALLOW_LOCAL_PGLITE="1"; pnpm --filter @utc/web start`, bash `ALLOW_LOCAL_PGLITE=1 pnpm --filter @utc/web start` — server log cảnh báo `pglite_production_local`; với Postgres cần thêm `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`.
 
-Postgres nhúng tự tạo bảng + 16 tiết ở lần chạy đầu (dữ liệu lưu trong `apps/web/.pglite`). Mỗi lần khởi động, app tự chạy các migration còn thiếu — **kéo code có migration mới về thì KHÔNG cần xoá `.pglite`**, dữ liệu dev được giữ nguyên (DB tạo trước khi có cơ chế này cũng được nâng cấp tự động). Muốn chạy migration mà không bật app: dừng `pnpm dev` rồi `pnpm db:migrate`. Tạo tài khoản quản trị đầu tiên (dừng `pnpm dev` trước, vì Postgres nhúng chỉ cho một tiến trình mở; script tự đọc `DATABASE_URL` trong `apps/web/.env.local`):
+Postgres nhúng tự tạo bảng + 16 tiết ở lần chạy đầu (dữ liệu lưu trong `apps/web/.pglite`). Không có Supabase thì ảnh thẻ lưu cục bộ trong `apps/web/.local-storage/` (gitignore; chỉ khi `pglite:` và không chạy trên Vercel). Mỗi lần khởi động, app tự chạy các migration còn thiếu — **kéo code có migration mới về thì KHÔNG cần xoá `.pglite`**, dữ liệu dev được giữ nguyên (DB tạo trước khi có cơ chế này cũng được nâng cấp tự động). Muốn chạy migration mà không bật app: dừng `pnpm dev` rồi `pnpm db:migrate`. Tạo tài khoản quản trị đầu tiên (dừng `pnpm dev` trước, vì Postgres nhúng chỉ cho một tiến trình mở; script tự đọc `DATABASE_URL` trong `apps/web/.env.local`):
 
 ```powershell
 $env:ADMIN_EMAIL="admin@utc.edu.vn"; $env:ADMIN_PASSWORD="mat-khau-dai-it-nhat-10"; $env:ADMIN_NAME="Quản trị viên"
@@ -61,6 +61,7 @@ Seed vào một DB khác mà không sửa `.env.local`: đặt `DATABASE_URL` �
 |---|---|
 | `pnpm test` | Test mọi package |
 | `pnpm --filter @utc/backend test` | Test riêng một package |
+| `pnpm --filter @utc/web test` | Test logic phía client (nén ảnh, mã lỗi, máy trạng thái đăng ký thẻ) |
 | `pnpm lint` · `pnpm typecheck` | Kiểm tra mã |
 | `pnpm build` | Build Next.js |
 | `pnpm db:generate` | Sinh migration từ `packages/database/src/schema.ts` |

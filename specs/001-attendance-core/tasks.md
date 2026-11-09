@@ -145,8 +145,8 @@ US1 (P1) → US6 (P1, thẻ SV — cần trước khi điểm danh) → US2 (P1)
 - [x] T059 [US6] Nonce dùng một lần (purpose card/checkin, hạn 2', challenge) trong `packages/backend/src/security/nonce.ts`
 - [x] T060 [US6] API `POST /api/auth/student/login` (thông báo lỗi chung, rate limit, ghi security_events), `POST /api/student/consent`, `POST /api/student/card/nonce`, `POST /api/student/card` trong `apps/web/src/app/api/auth/student/login/route.ts`, `apps/web/src/app/api/student/**/route.ts`
 - [x] T061 [US6] API duyệt/đặt lại thẻ `POST /api/admin/students/{id}/card/reset` (+ duyệt `pending_review` cho GV có SV trong lớp) trong `apps/web/src/app/api/admin/students/[id]/card/**/route.ts`
-- [ ] T062 [P] [US6] UI đăng nhập SV bằng mã trong `apps/web/src/app/(auth)/sv/page.tsx`
-- [ ] T063 [US6] UI đồng ý điều khoản + chụp thẻ chỉ bằng camera trực tiếp (không input file), khung căn thẻ, hướng dẫn chụp lại trong `apps/web/src/app/sv/the-sinh-vien/page.tsx`, `apps/web/src/components/camera/CardCapture.tsx`
+- [X] T062 [P] [US6] UI đăng nhập SV bằng mã trong `apps/web/src/app/(auth)/sv/page.tsx` *(+ màn đồng ý `/sv/dong-y`, chọn lớp `/sv/lop` — API `GET /api/student/classes`)*
+- [X] T063 [US6] *(2026-11-10; kèm mặt trực tiếp 3 khung FR-045a + hàng chờ duyệt GV `/gv/lop/[classId]/the`; fallback `<input capture=environment>` chỉ hiện trên thiết bị cảm ứng khi không mở được camera trong trang — xem FR-045)* UI đồng ý điều khoản + chụp thẻ chỉ bằng camera trực tiếp (không input file), khung căn thẻ, hướng dẫn chụp lại trong `apps/web/src/app/sv/the-sinh-vien/page.tsx`, `apps/web/src/components/camera/CardCapture.tsx`
 - [x] T064 [US6] Cập nhật `purge_after` của thẻ khi ghi danh/ngày kết thúc lớp thay đổi trong `packages/backend/src/card/retention.ts`
 
 **Checkpoint**: SV có thẻ `active`; Q4–Q5 đạt
