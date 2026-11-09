@@ -62,12 +62,19 @@ export class EnvError extends Error {
 
 /** Kiểm một nguồn biến môi trường (thuần, dùng cho env(), kiểm khởi động và test). Lỗi chỉ nêu tên biến + lý do, không in giá trị. */
 export function parseEnv(source: Record<string, string | undefined>): Env {
-  const schema = source.DATABASE_URL?.startsWith("pglite:") ? LocalSchema : HostedSchema;
-  const parsed = schema.safeParse(source);
+  const pglite = !!source.DATABASE_URL?.startsWith("pglite:");
+  const problems: { name: string; message: string }[] = [];
+  // Postgres nhúng chỉ cho dev cục bộ: dữ liệu nằm trên đĩa tạm của instance (mất khi scale/redeploy), một tiến trình.
+  if (pglite && (source.VERCEL === "1" || source.NODE_ENV === "production")) {
+    problems.push({ name: "DATABASE_URL", message: "DATABASE_URL: pglite: chỉ dùng cho dev cục bộ — không dùng trên Vercel/production" });
+  }
+  const parsed = (pglite ? LocalSchema : HostedSchema).safeParse(source);
   if (!parsed.success) {
-    const names = [...new Set(parsed.error.issues.map((i) => String(i.path[0])))];
-    const issues = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("\n");
-    throw new EnvError(`Biến môi trường không hợp lệ:\n${issues}`, names);
+    for (const i of parsed.error.issues) problems.push({ name: String(i.path[0]), message: `${i.path.join(".")}: ${i.message}` });
+  }
+  if (problems.length || !parsed.success) {
+    const names = [...new Set(problems.map((p) => p.name))];
+    throw new EnvError(`Biến môi trường không hợp lệ:\n${problems.map((p) => p.message).join("\n")}`, names);
   }
   if (parsed.data.CARD_REJECT_BELOW >= parsed.data.CARD_ACCEPT_ABOVE) {
     throw new EnvError("CARD_REJECT_BELOW phải nhỏ hơn CARD_ACCEPT_ABOVE", ["CARD_REJECT_BELOW", "CARD_ACCEPT_ABOVE"]);

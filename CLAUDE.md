@@ -43,7 +43,7 @@
 - Migration: runner chung `packages/database/src/migrator.ts` cho pglite và Postgres — mỗi file một transaction, bảng theo dõi của Drizzle, **tự baseline** DB kiểu cũ; thêm migration không cần xoá `.pglite`.
 - Script ghi DB (`packages/database/src/db-target.ts`): `db:seed:demo` **chỉ DB cục bộ** (cấm production/Supabase/remote); `db:migrate`, `admin:create` lên remote cần `CONFIRM_REMOTE_DB=true`.
 - Đóng gói Vercel: `next.config.ts` phân giải đường dẫn thật của wasm/dữ liệu OCR; `pnpm check:traces` chạy trong CI và trong `buildCommand`.
-- Biến môi trường kiểm **lúc khởi động** (`apps/web/src/instrumentation.ts` → `checkEnvOnStartup` trong `packages/backend/src/startup.ts`, chỉ runtime nodejs; không chạy lúc `next build`): thiếu/sai → log `env_invalid` chỉ tên biến, mọi request 500 (Next 15 không thoát tiến trình). `pglite:` chỉ bắt buộc `DATABASE_URL`, `JWT_SECRET`, `LOG_HMAC_SECRET`; Postgres bắt buộc thêm `SUPABASE_*`, `CRON_SECRET`.
+- Biến môi trường kiểm **lúc khởi động** (`apps/web/src/instrumentation.ts` → `checkEnvOnStartup` trong `packages/backend/src/startup.ts`, chỉ runtime nodejs; không chạy lúc `next build`): thiếu/sai → log `env_invalid` chỉ tên biến, mọi request 500 (Next 15 không thoát tiến trình). `pglite:` chỉ bắt buộc `DATABASE_URL`, `JWT_SECRET`, `LOG_HMAC_SECRET` và **bị chặn khi `VERCEL=1` hoặc `NODE_ENV=production`** (kể cả `next start` cục bộ); Postgres bắt buộc thêm `SUPABASE_*`, `CRON_SECRET`.
 - CodeQL: repo private → `upload: never` + `.github/scripts/codeql-gate.mjs` chặn theo SARIF.
 
 ### 5. Đang dở

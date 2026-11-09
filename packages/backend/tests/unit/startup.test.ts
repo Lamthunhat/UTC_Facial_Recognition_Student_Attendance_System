@@ -65,6 +65,29 @@ describe("checkEnvOnStartup", () => {
     expect(() => checkEnvOnStartup(PGLITE)).not.toThrow();
   });
 
+  it("pglite trên Vercel (VERCEL=1) → env_invalid, tên DATABASE_URL", () => {
+    expect(startupError({ ...PGLITE, VERCEL: "1" }).message).toMatch(/DATABASE_URL/);
+    expect(JSON.parse(errors[0])).toMatchObject({ msg: "env_invalid", names: ["DATABASE_URL"] });
+  });
+
+  it("pglite với NODE_ENV=production → env_invalid, tên DATABASE_URL", () => {
+    startupError({ ...PGLITE, NODE_ENV: "production" });
+    expect(JSON.parse(errors[0]).names).toEqual(["DATABASE_URL"]);
+  });
+
+  it("pglite production còn thiếu biến khác → báo cả DATABASE_URL lẫn biến thiếu", () => {
+    const { LOG_HMAC_SECRET: _drop, ...rest } = PGLITE;
+    void _drop;
+    startupError({ ...rest, VERCEL: "1" });
+    expect(JSON.parse(errors[0]).names).toEqual(["DATABASE_URL", "LOG_HMAC_SECRET"]);
+  });
+
+  it("Postgres trên Vercel/production → hợp lệ; pglite ở development/test → hợp lệ", () => {
+    expect(() => checkEnvOnStartup({ ...POSTGRES, VERCEL: "1", NODE_ENV: "production" })).not.toThrow();
+    expect(() => checkEnvOnStartup({ ...PGLITE, NODE_ENV: "development" })).not.toThrow();
+    expect(() => checkEnvOnStartup({ ...PGLITE, NODE_ENV: "test", VERCEL: "0" })).not.toThrow();
+  });
+
   it("pglite thiếu LOG_HMAC_SECRET → vẫn lỗi khởi động", () => {
     const { LOG_HMAC_SECRET: _drop, ...rest } = PGLITE;
     void _drop;
