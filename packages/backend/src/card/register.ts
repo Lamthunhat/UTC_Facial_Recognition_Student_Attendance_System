@@ -1,6 +1,6 @@
 import "server-only";
 import { randomInt, randomUUID } from "node:crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@utc/database";
 import { studentCards, students } from "@utc/database/schema";
 import { vnDateOf } from "@utc/shared/periods";
@@ -18,7 +18,7 @@ import { requireConsent } from "../student/consent";
 import { decodeCard } from "./decode";
 import { analyzePortraits, type AnalyzedPortraits } from "./portrait";
 import { cardPurgeAfter } from "./retention";
-import { duplicateDecision, evaluateCard, nameAppearsIn, type CardRejectCode, type CardReviewReason, type DecodedCode } from "./verify";
+import { duplicateDecision, evaluateCard, nameAppearsIn, ocrNameLine, type CardRejectCode, type CardReviewReason, type DecodedCode } from "./verify";
 
 /**
  * T058 — Đăng ký thẻ sinh viên (US6, FR-045…FR-049, FR-045a, Principle I/III/IV, FR-082).
@@ -245,6 +245,8 @@ async function processCard(
         duplicateSimilarity: dup?.similarity ?? null,
         nameMatched,
         liveSimilarity,
+        // Chỉ lưu dòng họ tên OCR khi cần giảng viên đối chiếu (tối thiểu hoá dữ liệu)
+        ocrName: reviewReasons.includes("NAME_MISMATCH") ? ocrNameLine(text) : null,
         purgeAfter: await cardPurgeAfter(tx, studentId),
       });
       await writeAudit(session, "card.register", { type: "student_card", id: cardId }, { status, method: decoded!.method, reviewReasons, liveSimilarity: Math.round(liveSimilarity * 1000) / 1000 }, tx);
@@ -262,12 +264,24 @@ async function processCard(
 }
 
 /** Trạng thái thẻ của chính SV — không trả embedding, đường dẫn ảnh hay lý do nghi vấn. */
-export async function myCardStatus(studentId: string) {
+/**
+ * Trạng thái thẻ cho chính SV (không lý do, không ảnh). Không có thẻ hiệu lực → xem thẻ gần nhất:
+ * `deleted` do giảng viên từ chối (có reviewed_by) → "rejected"; `replaced` (giảng viên/Admin đặt lại) → "reset".
+ * Cả hai: SV đăng ký lại được. (Cron xoá hết hạn — Polish — phải không để lại `deleted` + reviewed_by.)
+ */
+export type MyCardStatus = "active" | "pending_review" | "rejected" | "reset";
+
+export async function myCardStatus(studentId: string): Promise<{ status: MyCardStatus; registeredAt: Date } | null> {
   const db = await getDb();
   const [c] = await db
-    .select({ status: studentCards.status, registeredAt: studentCards.registeredAt })
+    .select({ status: studentCards.status, registeredAt: studentCards.registeredAt, reviewedBy: studentCards.reviewedBy })
     .from(studentCards)
-    .where(and(eq(studentCards.studentId, studentId), inArray(studentCards.status, ["active", "pending_review"])))
+    .where(eq(studentCards.studentId, studentId))
+    .orderBy(sql`case when ${studentCards.status} in ('active','pending_review') then 0 else 1 end`, desc(studentCards.registeredAt))
     .limit(1);
-  return c ?? null;
+  if (!c) return null;
+  if (c.status === "active" || c.status === "pending_review") return { status: c.status, registeredAt: c.registeredAt };
+  if (c.status === "deleted" && c.reviewedBy) return { status: "rejected", registeredAt: c.registeredAt };
+  if (c.status === "replaced") return { status: "reset", registeredAt: c.registeredAt };
+  return null;
 }

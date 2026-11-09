@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -16,7 +17,13 @@ import { loadMigrations, MIGRATIONS_TABLE, pgliteExecutor, runMigrations } from 
  * baseline cho DB tạo theo kiểu cũ (chạy thẳng mọi file .sql, không ghi nhận).
  */
 const DIR = path.resolve(__dirname, "../migrations");
-const ALL = ["0000_init", "0001_hardening", "0002_card_review", "0003_card_live_check"];
+/** Mọi migration theo journal — thêm migration mới không phải sửa test. */
+const ALL = (JSON.parse(readFileSync(path.join(DIR, "meta/_journal.json"), "utf8")) as { entries: { idx: number; tag: string }[] }).entries
+  .sort((a, b) => a.idx - b.idx)
+  .map((e) => e.tag);
+/** Migration có từ trước khi có runner (DB "kiểu cũ" chỉ có thể chứa tới đây) — có dấu hiệu baseline trong migrator.ts. */
+const LEGACY_ERA = ["0000_init", "0001_hardening", "0002_card_review", "0003_card_live_check"];
+const after = (tag: string) => ALL.slice(ALL.indexOf(tag) + 1);
 const opened: PGlite[] = [];
 const temps: string[] = [];
 
@@ -72,7 +79,7 @@ describe("runMigrations", () => {
     const pg = await legacyDb(["0000_init", "0001_hardening"]);
     await pg.query(`insert into students (student_code, last_name, first_name) values ('231230801','Nguyễn Văn','An')`);
     const r = await runMigrations(pgliteExecutor(pg), { dir: DIR });
-    expect(r).toEqual({ baselined: ["0000_init", "0001_hardening"], applied: ["0002_card_review", "0003_card_live_check"] });
+    expect(r).toEqual({ baselined: ["0000_init", "0001_hardening"], applied: after("0001_hardening") });
     expect(await hasColumn(pg, "students", "consent_version")).toBe(true);
     expect(await hasColumn(pg, "student_cards", "review_reasons")).toBe(true);
     expect(await hasColumn(pg, "student_cards", "live_similarity")).toBe(true);
@@ -81,39 +88,45 @@ describe("runMigrations", () => {
     expect(await runMigrations(pgliteExecutor(pg), { dir: DIR })).toEqual({ baselined: [], applied: [] });
   });
 
-  it("DB kiểu cũ đã có đủ 0000–0003 (tạo sau khi có 0003) → chỉ baseline, không chạy lại", async () => {
-    const pg = await legacyDb(ALL);
-    expect(await runMigrations(pgliteExecutor(pg), { dir: DIR })).toEqual({ baselined: ALL, applied: [] });
+  it("DB kiểu cũ đã có đủ 0000–0003 (tạo sau khi có 0003) → baseline 0000–0003, chỉ chạy migration mới hơn", async () => {
+    const pg = await legacyDb(LEGACY_ERA);
+    expect(await runMigrations(pgliteExecutor(pg), { dir: DIR })).toEqual({ baselined: LEGACY_ERA, applied: after("0003_card_live_check") });
+  });
+
+  it("migration mới hơn thời kỳ cũ không có dấu hiệu baseline (luôn được chạy thật)", async () => {
+    const { LEGACY_MARKER_TAGS } = await import("../src/migrator");
+    expect(LEGACY_MARKER_TAGS).toEqual(LEGACY_ERA);
   });
 
   it("DB kiểu cũ có users nhưng THIẾU dấu hiệu của 0001 → chỉ baseline 0000, chạy 0001+", async () => {
     const pg = await legacyDb(["0000_init"]);
     const r = await runMigrations(pgliteExecutor(pg), { dir: DIR });
-    expect(r).toEqual({ baselined: ["0000_init"], applied: ["0001_hardening", "0002_card_review", "0003_card_live_check"] });
+    expect(r).toEqual({ baselined: ["0000_init"], applied: after("0000_init") });
     expect((await pg.query(`select public.f_unaccent('Nguyễn Đức') as v`)).rows).toEqual([{ v: "Nguyen Duc" }]);
   });
 
   it("migration lỗi giữa chừng → rollback cả file đó (không còn câu lệnh nào của nó), không ghi nhận; các file trước vẫn giữ", async () => {
+    const BAD = "9999_bad";
     const dir = await mkdtemp(path.join(tmpdir(), "mig-"));
     temps.push(dir);
     await mkdir(path.join(dir, "meta"));
     for (const t of ALL) await copyFile(path.join(DIR, `${t}.sql`), path.join(dir, `${t}.sql`));
     const j = await journal();
-    j.entries.push({ ...j.entries[j.entries.length - 1], idx: 4, tag: "0004_bad", when: j.entries[j.entries.length - 1].when + 1 } as never);
+    j.entries.push({ ...j.entries[j.entries.length - 1], idx: ALL.length, tag: BAD, when: j.entries[j.entries.length - 1].when + 1 } as never);
     await writeFile(path.join(dir, "meta/_journal.json"), JSON.stringify(j));
     await writeFile(
-      path.join(dir, "0004_bad.sql"),
+      path.join(dir, `${BAD}.sql`),
       `CREATE TABLE "half_done" (id int);--> statement-breakpoint\nALTER TABLE "students" ADD COLUMN "x" int;--> statement-breakpoint\nSELECT * FROM "khong_ton_tai";`,
     );
 
     const pg = await emptyDb();
-    await expect(runMigrations(pgliteExecutor(pg), { dir })).rejects.toThrow(/0004_bad/);
+    await expect(runMigrations(pgliteExecutor(pg), { dir })).rejects.toThrow(new RegExp(BAD));
     expect((await pg.query(`select to_regclass('public.half_done') as t`)).rows[0]).toEqual({ t: null });
     expect(await hasColumn(pg, "students", "x")).toBe(false);
-    expect(await tracked(pg)).toHaveLength(ALL.length); // 0000–0003 đã commit, 0004 không được ghi nhận
-    // sửa file rồi chạy lại → chỉ chạy 0004
-    await writeFile(path.join(dir, "0004_bad.sql"), `CREATE TABLE "half_done" (id int);`);
-    expect(await runMigrations(pgliteExecutor(pg), { dir })).toEqual({ baselined: [], applied: ["0004_bad"] });
+    expect(await tracked(pg)).toHaveLength(ALL.length); // các file thật đã commit, file lỗi không được ghi nhận
+    // sửa file rồi chạy lại → chỉ chạy file đó
+    await writeFile(path.join(dir, `${BAD}.sql`), `CREATE TABLE "half_done" (id int);`);
+    expect(await runMigrations(pgliteExecutor(pg), { dir })).toEqual({ baselined: [], applied: [BAD] });
   });
 
   it("migrateLocal (openLocalDb): DB mới → seed 16 tiết; mở lại không ghi đè bảng tiết Admin đã sửa", async () => {

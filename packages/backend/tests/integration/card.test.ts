@@ -7,6 +7,8 @@ import { GET as staffGetCard } from "../../src/api/admin/student-card";
 import { POST as staffResetCard } from "../../src/api/admin/student-card-reset";
 import { POST as staffReviewCard } from "../../src/api/admin/student-card-review";
 import { GET as myCard, POST as uploadCard } from "../../src/api/student/card";
+import { GET as myClasses } from "../../src/api/student/classes";
+import { GET as classCards } from "../../src/api/classes/cards";
 import { POST as cardNonce } from "../../src/api/student/card-nonce";
 import { POST as giveConsent } from "../../src/api/student/consent";
 import { createSession, SESSION_COOKIE } from "../../src/auth/session";
@@ -370,6 +372,8 @@ describe("POST /api/student/card — đăng ký thẻ", () => {
     const card = await liveCard("H");
     expect(card.review_reasons).toEqual(["NAME_MISMATCH"]);
     expect(card.name_matched).toBe(false);
+    // dòng họ tên đọc bằng OCR được lưu để giảng viên đối chiếu (không phải dữ liệu sinh trắc)
+    expect((await q<{ ocr_name: string | null }>(`select ocr_name from student_cards where id=$1`, [card.id]))[0].ocr_name).toBe("NGUYỄN VĂN TÈO");
   });
 
   it("6 lượt/giờ/SV; mỗi lỗi kèm remainingAttempts giảm dần; lượt 7 → 429 với remainingAttempts 0 + Retry-After", async () => {
@@ -521,7 +525,13 @@ describe("giảng viên/admin: xem, duyệt, đặt lại thẻ (FR-049, T061)",
       cardUrl: expect.stringContaining("/cards/"),
     });
     expect(card.duplicateOf.similarity).toBeGreaterThanOrEqual(0.6);
+    expect(card).toMatchObject({ rosterName: "Hoàng Thị Giang", ocrName: null, liveSimilarity: expect.any(Number) });
     expect(JSON.stringify(card)).not.toMatch(/embedding/);
+  });
+
+  it("thẻ NAME_MISMATCH: giảng viên thấy dòng họ tên OCR cạnh họ tên trong danh sách", async () => {
+    const { card } = await readJson(await staffReq("gv1", "H", ""));
+    expect(card).toMatchObject({ reviewReasons: ["NAME_MISMATCH"], ocrName: "NGUYỄN VĂN TÈO", rosterName: "Bùi Thanh Hương" });
   });
 
   it("giảng viên không dạy SV đó → 404 cho xem / duyệt / đặt lại (chống IDOR)", async () => {
@@ -549,6 +559,10 @@ describe("giảng viên/admin: xem, duyệt, đặt lại thẻ (FR-049, T061)",
     );
     expect(c).toEqual({ status: "deleted", emb: true, p: null });
     expect(removed.flatMap((r) => r.paths).some((p) => p.startsWith(`${ids.H}/`))).toBe(true);
+    // SV thấy "bị từ chối" — không kèm lý do / ghi chú của giảng viên
+    const mine = await readJson(await myCard(json("/api/student/card", cookie.H, undefined, "GET"), NO_PARAMS));
+    expect(mine.card).toMatchObject({ status: "rejected" });
+    expect(JSON.stringify(mine)).not.toMatch(/NAME_MISMATCH|Tên không khớp|reason|note/i);
   });
 
   it("admin đặt lại thẻ: thẻ cũ → replaced (giữ lịch sử, xoá dữ liệu sinh trắc), audit + security_events card_replaced, SV đăng ký lại được", async () => {
@@ -560,6 +574,9 @@ describe("giảng viên/admin: xem, duyệt, đặt lại thẻ (FR-049, T061)",
     await new Promise((r) => setTimeout(r, 50));
     expect(await q(`select 1 from security_events where type='card_replaced' and actor_id=$1`, [ids.admin])).toHaveLength(1);
     expect(removed.flatMap((r) => r.paths).some((p) => p.startsWith(`${ids.A}/`))).toBe(true);
+    const mine = await readJson(await myCard(json("/api/student/card", cookie.A, undefined, "GET"), NO_PARAMS));
+    expect(mine.card).toMatchObject({ status: "reset" });
+    expect(JSON.stringify(mine)).not.toMatch(/SV được cấp thẻ mới/);
 
     scenario("231230801", 11);
     expect((await readJson(await submit("A"))).status).toBe("active");
@@ -601,5 +618,46 @@ describe("hạn giữ ảnh thẻ cập nhật theo lớp (FR-054, T064)", () =>
     await updateClass(gv1(), ids.K1, { endDate: newEnd });
     expect(await purgeOf("F")).toBe(purgeFor(newEnd));
     expect(await purgeOf("G")).toBe(purgeFor(K2_END)); // K2 vẫn muộn hơn
+  });
+});
+
+describe("GET /api/classes/{id}/cards — danh sách SV + trạng thái thẻ cho giảng viên (T063)", () => {
+  const list = (who: string, cls: string) => classCards(json(`/api/classes/${ids[cls]}/cards`, cookie[who], undefined, "GET"), params({ id: ids[cls] }));
+
+  it("giảng viên lớp khác → 404; admin xem được", async () => {
+    expect((await list("gv2", "K1")).status).toBe(404);
+    expect((await list("admin", "K1")).status).toBe(200);
+  });
+
+  it("mỗi SV đang học có trạng thái thẻ; lý do chờ duyệt chỉ ở thẻ pending_review; không có ảnh/embedding", async () => {
+    await q(`insert into student_cards (student_id, decoded_code, decode_method, status, review_reasons, live_similarity)
+             values ($1, '231230809', 'barcode', 'pending_review', '["LIVE_MISMATCH"]'::jsonb, 0.31)`, [ids.O]);
+    const fresh = (await q<{ id: string }>(`insert into students (student_code,last_name,first_name) values ('231230899','Vũ Minh','Quân') returning id`))[0].id;
+    await q(`insert into enrollments (class_id, student_id) values ($1,$2)`, [ids.K1, fresh]);
+    const res = await list("gv1", "K1");
+    expect(res.status).toBe(200);
+    const { students } = await readJson(res);
+    const by = Object.fromEntries(students.map((s: { code: string }) => [s.code, s]));
+    expect(by["231230809"]).toMatchObject({ studentId: ids.O, fullName: "Ngô Thị Linh", card: { status: "pending_review", reviewReasons: ["LIVE_MISMATCH"] } });
+    expect(by["231230802"].card).toMatchObject({ status: "active", reviewReasons: [] });
+    expect(by["231230808"].card).toMatchObject({ status: "rejected" }); // H bị từ chối ở trên
+    expect(by["231230899"].card).toBeNull(); // SV mới chưa có thẻ
+    expect(by["231230804"]).toBeUndefined(); // D học lớp K2
+    expect(JSON.stringify(students)).not.toMatch(/embedding|cards\/|https?:/);
+  });
+});
+
+describe("GET /api/student/classes — lớp của SV (T062)", () => {
+  it("chỉ lớp đang ghi danh active và chưa kết thúc; không có lớp người khác", async () => {
+    const ended = (await q<{ id: string }>(`insert into classes (instructor_id, code, course_name, start_date, end_date, default_room) values ($1,'CU','HP cũ',$2,$3,'P1') returning id`, [ids.gv1, daysFromToday(-200), daysFromToday(-100)]))[0].id;
+    const left = (await q<{ id: string }>(`insert into classes (instructor_id, code, course_name, start_date, end_date) values ($1,'RUT','HP rút',$2,$3) returning id`, [ids.gv1, daysFromToday(-10), daysFromToday(50)]))[0].id;
+    const s = (await q<{ id: string }>(`insert into students (student_code,last_name,first_name) values ('231230898','Trịnh Văn','Sơn') returning id`))[0].id;
+    await q(`insert into enrollments (class_id, student_id, status) values ($1,$4,'active'), ($2,$4,'active'), ($3,$4,'withdrawn')`, [ids.K1, ended, left, s]);
+    cookie.S = `${SESSION_COOKIE}=${(await createSession(s, "student")).token}`;
+    await consent("S");
+    const res = await myClasses(json("/api/student/classes", cookie.S, undefined, "GET"), NO_PARAMS);
+    expect(res.status).toBe(200);
+    const { classes } = await readJson(res);
+    expect(classes).toEqual([{ classId: ids.K1, code: "K1", courseName: "HP", room: null, openWindow: null }]);
   });
 });

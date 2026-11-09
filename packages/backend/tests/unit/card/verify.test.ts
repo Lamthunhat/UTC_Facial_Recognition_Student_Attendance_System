@@ -4,6 +4,7 @@ import {
   evaluateCard,
   extractStudentCode,
   nameAppearsIn,
+  ocrNameLine,
   pickBarcodeCode,
   PORTRAIT_RULES,
   type PortraitFace,
@@ -171,5 +172,20 @@ describe("duplicateDecision — trùng mặt 1:N", () => {
   it("không ai vượt ngưỡng → null", () => {
     expect(duplicateDecision([{ studentId: "a", similarity: 0.59 }], 0.6)).toBeNull();
     expect(duplicateDecision([], 0.6)).toBeNull();
+  });
+});
+
+describe("ocrNameLine — dòng họ tên trên thẻ (để giảng viên đối chiếu khi NAME_MISMATCH)", () => {
+  it("lấy phần sau nhãn 'Họ tên' / 'Họ và tên' (không phân biệt hoa thường, dấu)", () => {
+    expect(ocrNameLine("TRƯỜNG ĐẠI HỌC GTVT\nHọ tên: NGUYỄN VĂN TÈO\nMSSV: 231230808")).toBe("NGUYỄN VĂN TÈO");
+    expect(ocrNameLine("HO VA TEN :  Trần  Thị Bình \nMSSV 1")).toBe("Trần Thị Bình");
+    expect(ocrNameLine("HỌ TÊN: NGUYẾỄN VĂN AN")).toBe("NGUYẾỄN VĂN AN");
+  });
+
+  it("không có nhãn / nhãn rỗng → null; cắt tối đa 80 ký tự", () => {
+    expect(ocrNameLine("MSSV: 231230808")).toBeNull();
+    expect(ocrNameLine("Họ tên:   ")).toBeNull();
+    expect(ocrNameLine("")).toBeNull();
+    expect(ocrNameLine(`Họ tên: ${"A".repeat(200)}`)).toHaveLength(80);
   });
 });

@@ -90,6 +90,8 @@ const LEGACY_MARKERS: Record<string, string> = {
   "0002_card_review": `${col("students", "consent_version")} and ${col("student_cards", "review_reasons")}`,
   "0003_card_live_check": col("student_cards", "live_similarity"),
 };
+/** Các migration có dấu hiệu baseline (thời kỳ trước runner). Migration mới KHÔNG thêm vào đây. */
+export const LEGACY_MARKER_TAGS = Object.keys(LEGACY_MARKERS);
 
 /** Khoá tư vấn (advisory lock) để hai tiến trình không migrate cùng lúc. */
 const LOCK_KEY = 72_031_101;
