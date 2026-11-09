@@ -4,6 +4,7 @@ import sharp, { type OverlayOptions } from "sharp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prepareZXingModule, writeBarcode } from "zxing-wasm/writer";
 import { closeOcr, decodeCard, ocrText, readBarcodeTexts } from "../../../src/card/decode";
+import { nameAppearsIn } from "../../../src/card/verify";
 
 /**
  * T057 — Đọc mã vạch (zxing-wasm) + OCR (tesseract.js) chạy cục bộ trên thẻ GIẢ sinh trong test
@@ -46,7 +47,8 @@ describe("decode thẻ (chạy thật, cục bộ)", () => {
     const card = await syntheticCard({ code: "231230801", name: "NGUYỄN VĂN AN", barcode: false });
     const text = await ocrText(card);
     expect(text).toMatch(/231230801/);
-    expect(text.toUpperCase()).toMatch(/NGUY.N V.N AN/);
+    // Dấu đọc ra phụ thuộc font hệ thống (Linux CI không có Arial: "NGUYẾỄN") → kiểm bằng đúng bước so tên của nghiệp vụ.
+    expect(nameAppearsIn(text, "Nguyễn Văn An"), text).toBe(true);
   }, 60_000);
 
   it("decodeCard: ưu tiên mã vạch (method=barcode), kèm chữ OCR để so họ tên", async () => {

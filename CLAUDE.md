@@ -29,7 +29,7 @@
 | 4 US6 thẻ SV | 10/12 | Backend xong (T053–T061, T064); **UI T062, T063 chưa làm** |
 | 5–11 (US2, US3, US5, US4, US9, US8, US7) | 0 | |
 | 12 Polish | 0/14 | Có T144 (Turnstile) |
-- Test (lần chạy gần nhất): backend **386**, database **49**, shared **22** — tổng 457, đều pass. `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm check:traces` pass.
+- Test (lần chạy gần nhất): backend **387**, database **49**, shared **22** — tổng 458, đều pass. `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm check:traces` pass.
 
 ### 4. Quyết định đã chốt
 - Body request ≤ **4 MB** (giới hạn 4,5 MB của Vercel): danh sách lớp 4 MB, ảnh thẻ 1 MB, mỗi khung mặt 1 MB (FR-090, FR-100, research R14).

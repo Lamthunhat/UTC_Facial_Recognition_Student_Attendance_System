@@ -133,6 +133,10 @@ describe("nameAppearsIn — họ tên trên thẻ so bằng namesMatch", () => {
     expect(nameAppearsIn(ocr, "Nguyễn Văn An")).toBe(true);
   });
 
+  it("OCR thừa dấu (NGUYẾỄN — tesseract trên Linux CI, font thay thế) vẫn khớp", () => {
+    expect(nameAppearsIn("HỌ TÊN: NGUYẾỄN VĂN AN\n\nMSSV: 231230801", "Nguyễn Văn An")).toBe(true);
+  });
+
   it("họ tên nằm giữa dòng không có nhãn", () => {
     expect(nameAppearsIn("SINH VIÊN NGUYEN VAN AN K64", "Nguyễn Văn An")).toBe(true);
   });
