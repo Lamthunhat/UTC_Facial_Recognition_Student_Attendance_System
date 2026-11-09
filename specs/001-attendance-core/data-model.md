@@ -37,6 +37,7 @@ audit_logs   ai_queries   scan_nonces   rate_limits   geocode_cache
 | admin_class | text | Lớp hành chính, ví dụ "CNTT3" |
 | cohort | text | Khoá, ví dụ "K64" (từ file hoặc từ thẻ) |
 | consent_at | timestamptz | NULL = chưa đồng ý (FR-050) |
+| consent_version | text | Phiên bản văn bản đã đồng ý; khác `CONSENT_VERSION` hiện hành → phải đồng ý lại |
 | search_text | text | GENERATED: lower(f_unaccent(code ‖ họ ‖ tên ‖ họ+tên)) ; GIN trgm index |
 
 ### `student_cards` — Thẻ sinh viên (ảnh tham chiếu duy nhất)
@@ -52,7 +53,10 @@ audit_logs   ai_queries   scan_nonces   rate_limits   geocode_cache
 | status | enum `card_status` (`active`, `pending_review`, `replaced`, `deleted`) | |
 | reviewed_by | uuid | FK users, NULL |
 | registered_at | timestamptz | default now() |
-| purge_after | timestamptz | = max(class.end_date) của các lớp của SV + 30 ngày; cập nhật khi ghi danh thay đổi |
+| purge_after | timestamptz | = 00:00 (VN) ngày max(class.end_date) + 31 — hết ngày thứ 30 sau lớp muộn nhất SV đang học; cập nhật khi ghi danh / ngày kết thúc lớp thay đổi (T064) |
+| review_reasons | jsonb | `[]` hoặc `DUPLICATE_FACE`, `NAME_MISMATCH` — lý do `pending_review`, chỉ giảng viên/Admin xem |
+| duplicate_student_id / duplicate_similarity | uuid FK students / real | SV chung lớp có thẻ trùng mặt (cosine ≥ `DUPLICATE_ABOVE`) |
+| name_matched | boolean | Họ tên OCR trên thẻ khớp hồ sơ (namesMatch); NULL = không đọc được chữ |
 
 Ràng buộc: UNIQUE partial `(student_id) WHERE status IN ('active','pending_review')` — mỗi SV tối đa một thẻ hiệu lực/chờ duyệt.
 

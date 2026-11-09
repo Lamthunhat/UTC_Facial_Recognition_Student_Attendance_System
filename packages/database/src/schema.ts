@@ -95,6 +95,8 @@ export const students = pgTable(
     adminClass: text("admin_class"),
     cohort: text("cohort"),
     consentAt: ts("consent_at"),
+    /** Phiên bản văn bản điều khoản SV đã đồng ý (FR-050) — đổi văn bản thì phải đồng ý lại. */
+    consentVersion: text("consent_version"),
     createdAt: createdAt(),
   },
   (t) => [check("student_code_format", sql`${t.studentCode} ~ '^[0-9]{6,12}$'`)],
@@ -114,6 +116,14 @@ export const studentCards = pgTable(
     reviewedBy: uuid("reviewed_by").references(() => users.id),
     registeredAt: ts("registered_at").notNull().defaultNow(),
     purgeAfter: ts("purge_after"),
+    /** Lý do giữ chờ duyệt (DUPLICATE_FACE, NAME_MISMATCH) — chỉ giảng viên/Admin xem (Principle III). */
+    reviewReasons: jsonb("review_reasons").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    duplicateStudentId: uuid("duplicate_student_id").references(() => students.id, { onDelete: "set null" }),
+    duplicateSimilarity: real("duplicate_similarity"),
+    /** Họ tên OCR trên thẻ có khớp hồ sơ SV không (null = không đọc được chữ). */
+    nameMatched: boolean("name_matched"),
+    /** Cosine giữa khung mặt trực tiếp (nhìn thẳng) lúc đăng ký và chân dung thẻ — khung hình KHÔNG được lưu (FR-045a, FR-051). */
+    liveSimilarity: real("live_similarity"),
   },
   (t) => [
     uniqueIndex("one_live_card_per_student")

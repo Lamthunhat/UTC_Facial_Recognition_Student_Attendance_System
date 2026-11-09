@@ -32,9 +32,12 @@ pnpm dev                                # http://localhost:3000
 ```
 DATABASE_URL=pglite:./.pglite
 JWT_SECRET=<chuỗi ngẫu nhiên ≥ 32 ký tự>
+LOG_HMAC_SECRET=<chuỗi ngẫu nhiên ≥ 32 ký tự, khác JWT_SECRET>
 ```
 
-Postgres nhúng tự tạo bảng + 16 tiết ở lần chạy đầu (dữ liệu lưu trong `apps/web/.pglite`). Tạo tài khoản quản trị đầu tiên (dừng `pnpm dev` trước, vì Postgres nhúng chỉ cho một tiến trình mở; script tự đọc `DATABASE_URL` trong `apps/web/.env.local`):
+Server kiểm biến môi trường lúc khởi động: thiếu/sai thì log `env_invalid` kèm tên biến và mọi request trả 500. Với `DATABASE_URL=pglite:` chỉ ba biến trên là bắt buộc, và `pglite:` luôn bị chặn trên Vercel. Chạy bản build production cục bộ trên pglite (`pnpm build` rồi `next start`, ví dụ để đo hiệu năng) phải bật riêng cho lần chạy đó — PowerShell `$env:ALLOW_LOCAL_PGLITE="1"; pnpm --filter @utc/web start`, bash `ALLOW_LOCAL_PGLITE=1 pnpm --filter @utc/web start` — server log cảnh báo `pglite_production_local`; với Postgres cần thêm `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`.
+
+Postgres nhúng tự tạo bảng + 16 tiết ở lần chạy đầu (dữ liệu lưu trong `apps/web/.pglite`). Mỗi lần khởi động, app tự chạy các migration còn thiếu — **kéo code có migration mới về thì KHÔNG cần xoá `.pglite`**, dữ liệu dev được giữ nguyên (DB tạo trước khi có cơ chế này cũng được nâng cấp tự động). Muốn chạy migration mà không bật app: dừng `pnpm dev` rồi `pnpm db:migrate`. Tạo tài khoản quản trị đầu tiên (dừng `pnpm dev` trước, vì Postgres nhúng chỉ cho một tiến trình mở; script tự đọc `DATABASE_URL` trong `apps/web/.env.local`):
 
 ```powershell
 $env:ADMIN_EMAIL="admin@utc.edu.vn"; $env:ADMIN_PASSWORD="mat-khau-dai-it-nhat-10"; $env:ADMIN_NAME="Quản trị viên"
@@ -42,6 +45,15 @@ pnpm admin:create
 ```
 
 Rồi chạy lại `pnpm dev` và đăng nhập tại `/login`.
+
+**Dữ liệu demo (tuỳ chọn)** — tạo `admin@demo.utc.edu.vn`, giảng viên `gv.demo@demo.utc.edu.vn` và một lớp mẫu (Thứ 7, tiết 1–3). Cũng phải dừng `pnpm dev` trước. Script đọc `DATABASE_URL` giống `admin:create` (biến shell → `apps/web/.env.local` → `.env` gốc; ưu tiên `DIRECT_DATABASE_URL` nếu có), nên dùng được cho cả `pglite:` lẫn Postgres/Supabase; không chạy khi `NODE_ENV=production`. Chạy lại nhiều lần được — tài khoản đã có chỉ cập nhật tên, **không** đổi mật khẩu.
+
+```powershell
+$env:SEED_ADMIN_PASSWORD="mat-khau-admin-demo"; $env:SEED_INSTRUCTOR_PASSWORD="mat-khau-gv-demo"
+pnpm db:seed:demo
+```
+
+Seed vào một DB khác mà không sửa `.env.local`: đặt `DATABASE_URL` ở shell, ví dụ `$env:DATABASE_URL="pglite:D:\tmp\demo-db"` (đường dẫn tương đối tính từ thư mục đang đứng).
 
 ## Lệnh thường dùng (chạy ở thư mục gốc)
 
@@ -52,15 +64,18 @@ Rồi chạy lại `pnpm dev` và đăng nhập tại `/login`.
 | `pnpm lint` · `pnpm typecheck` | Kiểm tra mã |
 | `pnpm build` | Build Next.js |
 | `pnpm db:generate` | Sinh migration từ `packages/database/src/schema.ts` |
-| `pnpm db:migrate` | Chạy migration + seed 16 tiết / 5 ca vào database trong `DATABASE_URL` |
+| `pnpm db:migrate` | Chạy các migration còn thiếu (mỗi file một transaction, ghi nhận vào bảng theo dõi của Drizzle) cho `pglite:` hoặc Postgres trong `DATABASE_URL`/`DIRECT_DATABASE_URL`; seed 16 tiết / 5 ca khi DB mới tạo. Chạy lại nhiều lần được |
 | `pnpm admin:create` | Tạo/đặt lại tài khoản Admin (`ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME`) |
-| `pnpm db:seed:demo` | Dữ liệu demo (cần `SEED_ADMIN_PASSWORD`, `SEED_INSTRUCTOR_PASSWORD`) |
+| `pnpm db:seed:demo` | Dữ liệu demo cho `pglite:` hoặc Postgres (cần `SEED_ADMIN_PASSWORD`, `SEED_INSTRUCTOR_PASSWORD`; dừng `pnpm dev` nếu dùng pglite) — xem mục Bắt đầu |
 | `pnpm --filter @utc/backend spike:face <ảnh>` | Đo tốc độ nhận diện khuôn mặt |
 | `pnpm --filter @utc/backend spike:card <ảnh thẻ>` | Thử đọc mã vạch thẻ sinh viên |
+| `pnpm --filter @utc/backend calibrate:card <thư mục ảnh>` | Đo đọc thẻ trên ảnh thẻ thật (cục bộ, không lưu/gửi ảnh) — xác nhận R3, hiệu chỉnh ngưỡng chân dung |
+| `pnpm check:traces` | Sau `pnpm build`: kiểm function đọc thẻ có đủ wasm + dữ liệu OCR + model trong bản đóng gói |
 
 ## Lưu ý
 
-- Model InsightFace (buffalo_s) chỉ dùng cho mục đích phi thương mại / nghiên cứu.
+- **Giấy phép model khuôn mặt**: trọng số InsightFace `buffalo_s` (SCRFD-500M + MobileFaceNet) chỉ được dùng cho **mục đích phi thương mại / nghiên cứu học thuật** — phù hợp đồ án, KHÔNG dùng cho sản phẩm thương mại hay dịch vụ thu phí (khi đó phải thay model có giấy phép thương mại và hiệu chỉnh lại ngưỡng). Repo không phân phối lại model: tải bằng `pnpm models:download` (kiểm SHA-256). Chi tiết: `specs/001-attendance-core/research.md` R1.
 - Không commit ảnh khuôn mặt, ảnh thẻ, file `.env*` hay thư mục `models/`.
+- **An toàn dữ liệu khi chạy script**: `pnpm db:seed:demo` chỉ chạy trên DB cục bộ (`pglite:` hoặc localhost/127.0.0.1) — bị chặn với `NODE_ENV=production`, Supabase hay mọi DB remote, không có cờ nào mở được. `pnpm db:migrate` và `pnpm admin:create` được chạy lên DB remote nhưng phải xác nhận cho riêng lần chạy đó: PowerShell `$env:CONFIRM_REMOTE_DB="true"; pnpm db:migrate; Remove-Item Env:CONFIRM_REMOTE_DB` — bash `CONFIRM_REMOTE_DB=true pnpm db:migrate`. Không đặt `CONFIRM_REMOTE_DB` trong file `.env*`.
 - Font Be Vietnam Pro theo giấy phép SIL OFL 1.1 (`apps/web/public/fonts/OFL.txt`).
-- Deploy Vercel: Root Directory = `apps/web`.
+- Deploy Vercel + Supabase: xem [`docs/deploy.md`](docs/deploy.md) (biến môi trường, migrate, bucket, admin, checklist). Root Directory = `apps/web`; lệnh cài/build trong `apps/web/vercel.json`.

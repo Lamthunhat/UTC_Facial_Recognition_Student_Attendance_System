@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "regions": ["sin1"],
+  "installCommand": "cd ../.. && pnpm install --frozen-lockfile",
+  "buildCommand": "cd ../.. && pnpm models:download && pnpm --filter @utc/web build && pnpm check:traces",
+  "functions": {
+    "src/app/api/student/card/route.ts": {
+      "maxDuration": 60
+    }
+  }
+}

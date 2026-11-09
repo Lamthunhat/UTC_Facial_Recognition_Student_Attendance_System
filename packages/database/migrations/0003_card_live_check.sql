@@ -1,0 +1,1 @@
+ALTER TABLE "student_cards" ADD COLUMN "live_similarity" real;

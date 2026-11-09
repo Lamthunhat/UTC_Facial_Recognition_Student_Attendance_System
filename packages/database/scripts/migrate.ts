@@ -1,29 +1,60 @@
 /**
- * Chạy migration + seed tiết/ca. Dùng kết nối trực tiếp (port 5432, DIRECT_DATABASE_URL) nếu có,
- * vì migration cần phiên dài hơn transaction pooler.
- * Chạy: pnpm db:migrate
+ * Chạy mọi migration còn thiếu bằng runner dùng chung (src/migrator.ts) — mỗi file một transaction, ghi nhận vào bảng
+ * theo dõi của Drizzle, baseline DB tạo theo cơ chế cũ. Seed tiết/ca khi DB vừa được tạo.
+ *   pnpm db:migrate
+ * - Postgres/Supabase: ưu tiên DIRECT_DATABASE_URL (kết nối trực tiếp port 5432 — migration cần phiên dài hơn pooler).
+ * - `pglite:<thư mục>`: mở qua openLocalDb (cùng đường chạy với `pnpm dev`). Dừng `pnpm dev` trước khi chạy.
+ * Đọc DATABASE_URL giống create-admin.ts: biến shell → apps/web/.env.local → .env gốc.
+ * DB remote (không phải pglite:/localhost) → bắt buộc CONFIRM_REMOTE_DB=true cho lần chạy đó (src/db-target.ts).
  */
-import "dotenv/config";
+import { config } from "dotenv";
 import path from "node:path";
-import { drizzle } from "drizzle-orm/postgres-js";
-import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
+import { remoteWriteGuardError } from "../src/db-target";
+import { postgresJsExecutor, runMigrations } from "../src/migrator";
 import { seedPeriodsSql } from "../src/seed/periods";
 
+const ROOT = path.resolve(__dirname, "../../..");
+const WEB = path.join(ROOT, "apps/web");
+const fromShell = Boolean(process.env.DATABASE_URL);
+config({ path: path.join(WEB, ".env.local") });
+config({ path: path.join(ROOT, ".env") });
+if (process.env.DIRECT_DATABASE_URL) process.env.DATABASE_URL = process.env.DIRECT_DATABASE_URL;
+const url = process.env.DATABASE_URL ?? "";
+if (url.startsWith("pglite:") && !path.isAbsolute(url.slice(7))) {
+  const base = fromShell ? (process.env.INIT_CWD ?? process.cwd()) : WEB;
+  process.env.DATABASE_URL = `pglite:${path.resolve(base, url.slice(7) || ".pglite")}`;
+}
+
 async function main() {
-  const url = process.env.DIRECT_DATABASE_URL ?? process.env.DATABASE_URL;
-  if (!url) throw new Error("Thiếu DIRECT_DATABASE_URL hoặc DATABASE_URL");
-  const sql = postgres(url, { max: 1, prepare: false });
+  const guard = remoteWriteGuardError(process.env, "db:migrate");
+  if (guard) {
+    console.error(guard);
+    process.exit(1);
+  }
+  const target = process.env.DATABASE_URL;
+  if (!target) throw new Error("Thiếu DIRECT_DATABASE_URL hoặc DATABASE_URL");
+
+  if (target.startsWith("pglite:")) {
+    const { openLocalDb } = await import("../src/local"); // chạy migration + log kết quả khi mở
+    await openLocalDb(target);
+    console.log(`✔ Migration xong (${target})`);
+    return;
+  }
+
+  const sql = postgres(target, { max: 1, prepare: false });
   try {
-    await migrate(drizzle(sql), { migrationsFolder: path.resolve(__dirname, "../migrations") });
-    await sql.unsafe(seedPeriodsSql());
-    console.log("✔ Migration + seed tiết/ca xong");
+    const r = await runMigrations(postgresJsExecutor(sql), { dir: path.resolve(__dirname, "../migrations") });
+    if (r.applied.includes("0000_init")) await sql.unsafe(seedPeriodsSql());
+    console.log(`✔ Migration xong — baseline: ${r.baselined.join(", ") || "—"}; đã chạy: ${r.applied.join(", ") || "không có gì mới"}`);
   } finally {
     await sql.end();
   }
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+main()
+  .then(() => process.exit(0))
+  .catch((e) => {
+    console.error(e instanceof Error ? e.message : e);
+    process.exit(1);
+  });

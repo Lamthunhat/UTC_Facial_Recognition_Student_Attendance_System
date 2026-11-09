@@ -92,7 +92,7 @@ export function toResponse(err: unknown, ip: string | null = null): Response {
       void recordSecurityEvent("forbidden", { ip, meta: { code: err.code } });
     }
     if (err.status === 429) void recordSecurityEvent("rate_limited", { ip });
-    return json({ error: { code: err.code, message: err.message } }, { status: err.status, headers: err.headers });
+    return json({ error: { ...err.extra, code: err.code, message: err.message } }, { status: err.status, headers: err.headers });
   }
   if (err instanceof ZodError) {
     return json(

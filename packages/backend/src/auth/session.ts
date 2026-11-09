@@ -28,12 +28,15 @@ export async function createSession(actorId: string, role: Role) {
     expiresAt: new Date(Date.now() + ttl * 1000),
   });
   const token = await signSession({ sub: actorId, role, sid }, { ttlSeconds: ttl });
-  return { token, cookie: sessionCookie(token, ttl), sid };
+  // FR-004: phiên SV hết hạn khi đóng trình duyệt → cookie phiên (không Max-Age); JWT + user_sessions vẫn hết hạn sau ttl.
+  return { token, cookie: sessionCookie(token, role === "student" ? null : ttl), sid };
 }
 
-export function sessionCookie(token: string, maxAgeSec: number) {
+/** maxAgeSec = null → cookie phiên trình duyệt (mất khi đóng trình duyệt). */
+export function sessionCookie(token: string, maxAgeSec: number | null) {
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-  return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}${secure}`;
+  const maxAge = maxAgeSec === null ? "" : `; Max-Age=${maxAgeSec}`;
+  return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax${maxAge}${secure}`;
 }
 
 export function clearSessionCookie() {

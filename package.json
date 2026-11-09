@@ -19,7 +19,8 @@
     "db:migrate": "pnpm --filter @utc/database db:migrate",
     "db:seed:demo": "pnpm --filter @utc/database db:seed:demo",
     "models:download": "tsx scripts/download-models.ts",
-    "admin:create": "pnpm --filter @utc/backend admin:create"
+    "admin:create": "pnpm --filter @utc/backend admin:create",
+    "check:traces": "node scripts/check-traces.mjs"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",

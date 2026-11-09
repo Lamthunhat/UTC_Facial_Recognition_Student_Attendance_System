@@ -13,7 +13,7 @@ Ký hiệu quyền: 🅐 Admin · 🅖 Giảng viên (chỉ lớp của mình) �
 | Method | Path | Quyền | Body → Response |
 |---|---|---|---|
 | POST | `/api/auth/staff/login` | 🌐 | `{email, password}` → `{user:{id, fullName, role}}` + cookie |
-| POST | `/api/auth/student/login` | 🌐 | `{studentCode}` → `{student:{id, code, fullName, consentAt, hasActiveCard}}` + cookie (2h). 401 `LOGIN_FAILED` với một thông báo chung cho mọi lý do (FR-083); thử thách chống bot sau 3 lần thất bại/IP; 429 `RATE_LIMITED` |
+| POST | `/api/auth/student/login` | 🌐 | `{studentCode}` → `{student:{id, code, fullName, consentAt, consentValid, hasActiveCard}}` + cookie phiên trình duyệt (không Max-Age; JWT + `user_sessions` hết hạn 2h, có `sid` thu hồi được). Thành công khi mã có ghi danh `active` trong ≥ 1 lớp chưa qua ngày kết thúc (lớp sắp mở vẫn tính). 401 `LOGIN_FAILED` với một thông báo chung cho mọi lý do — kể cả body sai kiểu/thừa trường (FR-083); 429 `RATE_LIMITED` (theo IP: 50 lượt thất bại/5 phút — đầy thì chặn mọi lượt từ IP đó; Polish T144: thay bằng Turnstile — và trần tổng 300 lượt/5 phút; theo mã: 5 lượt thất bại/5 phút, đăng nhập đúng không bao giờ bị khoá theo mã) + `security_events`. Thử thách chống bot sau 3 lần thất bại: chưa làm (cần dịch vụ CAPTCHA) |
 | POST | `/api/auth/logout` | mọi vai trò | → 204 |
 | GET | `/api/me` | mọi vai trò | → thông tin phiên |
 
@@ -24,7 +24,9 @@ Ký hiệu quyền: 🅐 Admin · 🅖 Giảng viên (chỉ lớp của mình) �
 | GET/POST | `/api/admin/instructors` | 🅐 | Danh sách / tạo giảng viên |
 | PATCH | `/api/admin/instructors/{id}` | 🅐 | Khoá, đặt lại mật khẩu |
 | GET/PUT | `/api/admin/periods` | 🅐 | Xem / sửa bảng 16 tiết |
-| POST | `/api/admin/students/{id}/card/reset` | 🅐 🅖* | Cho phép đăng ký lại thẻ (*giảng viên có SV trong lớp) |
+| GET | `/api/admin/students/{id}/card` | 🅐 🅖* | Thẻ của SV: `{card:{status, decodedCode, decodeMethod, reviewReasons:[DUPLICATE_FACE|NAME_MISMATCH], nameMatched, duplicateOf:{studentId, code, fullName, similarity}|null, registeredAt, purgeAfter, cardUrl, portraitUrl}}` (URL ký 5 phút) |
+| POST | `/api/admin/students/{id}/card/reset` | 🅐 🅖* | `{reason}` → thẻ hiệu lực thành `replaced` (giữ bản ghi, xoá ảnh + embedding), audit trong transaction + `security_events` `card_replaced`; SV đăng ký lại được. 404 `NO_CARD` |
+| POST | `/api/admin/students/{id}/card/review` | 🅐 🅖* | `{decision:"approve"|"reject", note?}` cho thẻ `pending_review` → `active` / `deleted` (xoá ảnh + embedding). 409 `NOT_PENDING`. (*giảng viên: SV đang ghi danh trong lớp của mình, ngược lại 404) |
 | GET | `/api/admin/attendance` | 🅐 | Dữ liệu điểm danh toàn trường (bộ lọc như mục 6) |
 
 ## 3. Lớp học & danh sách
@@ -54,11 +56,12 @@ Lỗi chung của 2 API nhập file: 411 `LENGTH_REQUIRED` (thiếu `content-len
 
 | Method | Path | Quyền | Body → Response |
 |---|---|---|---|
-| POST | `/api/student/consent` | 🅢 | `{version}` → 204 |
+| POST | `/api/student/consent` | 🅢 | `{version}` → 204. Lưu `consent_at` + `consent_version`; phiên bản phải bằng `CONSENT_VERSION` (`@utc/shared/consent`), sai → 422 `CONSENT_VERSION_MISMATCH`. Mọi API thẻ/khuôn mặt của SV trả 403 `CONSENT_REQUIRED` khi chưa đồng ý đúng phiên bản hiện hành |
 | GET | `/api/geo/reverse?lat=&lng=` | 🅢 | Địa chỉ cho lớp phủ camera từ toạ độ của chính SV (cache ô 4 chữ số, rate limit 6/phút/SV); không trả gì về vị trí giảng viên (FR-031) |
 | GET | `/api/student/classes` | 🅢 | `[{classId, code, courseName, room, openWindow?:{id, type, closesAt}}]` |
-| POST | `/api/student/card/nonce` | 🅢 | → `{nonce, expiresAt}` |
-| POST | `/api/student/card` | 🅢 | multipart `{nonce, image}` → `{status:'active'|'pending_review', decodedCode}`; 422 `CODE_MISMATCH` / `UNREADABLE` / `NO_PORTRAIT` |
+| POST | `/api/student/card/nonce` | 🅢 | → `{nonce, expiresAt, challenge}` — `challenge` là `['left','right']` hoặc `['right','left']` (thử thách quay đầu ngẫu nhiên, FR-045a); nonce 2 phút, dùng một lần. 403 `CONSENT_REQUIRED` / `NOT_ENROLLED`; 409 `CARD_ALREADY_REGISTERED` / `CARD_PENDING_REVIEW`; 429 (6/phút) |
+| GET | `/api/student/card` | 🅢 | → `{card:{status, registeredAt}|null}` — không có ảnh, embedding hay lý do chờ duyệt |
+| POST | `/api/student/card` | 🅢 | multipart `{nonce, image, frames×3}`: `image` = ảnh thẻ (JPEG/PNG/WebP/HEIC ≤ 1 MB); `frames` = 3 khung mặt trực tiếp theo `challenge` — [hướng 1, nhìn thẳng, hướng 2], mỗi khung ≤ 1 MB; tổng ≤ 4 MB. → 201 `{status:'active'|'pending_review', decodedCode}` (không trả lý do chờ duyệt). Thứ tự: đồng ý → thuộc lớp → chưa có thẻ → nonce → rate limit 6/giờ/SV → sanitize (bỏ EXIF) → mã vạch/OCR → chân dung → liveness 3 khung → so mặt trực tiếp ↔ chân dung thẻ → trùng 1:N → **chỉ khi qua hết mới lưu ảnh thẻ + chân dung**; khung mặt trực tiếp không bao giờ được lưu; thẻ bị từ chối không lưu file, không ghi DB. Chờ duyệt (`review_reasons`): `DUPLICATE_FACE`, `LIVE_MISMATCH` (cosine < `CARD_ACCEPT_ABOVE`), `NAME_MISMATCH`. 422 `CODE_MISMATCH` / `UNREADABLE` / `NO_PORTRAIT` / `MULTIPLE_FACES` / `LIVENESS_FAILED` / `LIVE_NO_FACE` / `LIVE_MULTIPLE_FACES` / `UNSUPPORTED_TYPE` / `VALIDATION_ERROR` (không đủ 3 khung); 403 `BAD_NONCE`; 413 ảnh > 1 MB hoặc tổng > 4 MB; 429 khi hết lượt. Mọi lỗi sau khi đã tính lượt kèm `error.remainingAttempts` (số lượt còn lại trong giờ; 429 → 0); lỗi trước đó (chưa đồng ý, nonce sai) không tiêu lượt |
 | POST | `/api/windows/{id}/scan-nonce` | 🅢 | → `{nonce, challenge:['left','right'], expiresAt}` (2 phút). 403 `NOT_ENROLLED` / `NO_CHECKIN` / 409 `ALREADY_DONE` / 410 `WINDOW_CLOSED` / 412 `CARD_REQUIRED` |
 | POST | `/api/windows/{id}/events` | 🅢 | multipart `{nonce, frames[3] (jpeg), lat, lng, accuracyM}` → xem dưới |
 

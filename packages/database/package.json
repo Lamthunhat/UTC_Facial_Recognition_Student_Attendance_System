@@ -7,14 +7,16 @@
     "./schema": "./src/schema.ts",
     "./client": "./src/client.ts",
     "./seed/periods": "./src/seed/periods.ts",
-    "./testing": "./src/testing.ts"
+    "./testing": "./src/testing.ts",
+    "./migrator": "./src/migrator.ts",
+    "./db-target": "./src/db-target.ts"
   },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx scripts/migrate.ts",
-    "db:seed:demo": "tsx scripts/seed-demo.ts"
+    "db:migrate": "tsx --conditions=react-server scripts/migrate.ts",
+    "db:seed:demo": "tsx --conditions=react-server scripts/seed-demo.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.15",
