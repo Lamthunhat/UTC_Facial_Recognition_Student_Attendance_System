@@ -32,6 +32,7 @@ pnpm dev                                # http://localhost:3000
 ```
 DATABASE_URL=pglite:./.pglite
 JWT_SECRET=<chuỗi ngẫu nhiên ≥ 32 ký tự>
+LOG_HMAC_SECRET=<chuỗi ngẫu nhiên ≥ 32 ký tự, khác JWT_SECRET>
 ```
 
 Postgres nhúng tự tạo bảng + 16 tiết ở lần chạy đầu (dữ liệu lưu trong `apps/web/.pglite`). Mỗi lần khởi động, app tự chạy các migration còn thiếu — **kéo code có migration mới về thì KHÔNG cần xoá `.pglite`**, dữ liệu dev được giữ nguyên (DB tạo trước khi có cơ chế này cũng được nâng cấp tự động). Muốn chạy migration mà không bật app: dừng `pnpm dev` rồi `pnpm db:migrate`. Tạo tài khoản quản trị đầu tiên (dừng `pnpm dev` trước, vì Postgres nhúng chỉ cho một tiến trình mở; script tự đọc `DATABASE_URL` trong `apps/web/.env.local`):

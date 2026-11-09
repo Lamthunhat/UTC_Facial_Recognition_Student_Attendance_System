@@ -29,12 +29,12 @@
 | 4 US6 thẻ SV | 10/12 | Backend xong (T053–T061, T064); **UI T062, T063 chưa làm** |
 | 5–11 (US2, US3, US5, US4, US9, US8, US7) | 0 | |
 | 12 Polish | 0/14 | Có T144 (Turnstile) |
-- Test (lần chạy gần nhất): backend **379**, database **49**, shared **22** — tổng 450, đều pass. `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm check:traces` pass.
+- Test (lần chạy gần nhất): backend **386**, database **49**, shared **22** — tổng 457, đều pass. `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm check:traces` pass.
 
 ### 4. Quyết định đã chốt
 - Body request ≤ **4 MB** (giới hạn 4,5 MB của Vercel): danh sách lớp 4 MB, ảnh thẻ 1 MB, mỗi khung mặt 1 MB (FR-090, FR-100, research R14).
 - `writeAudit(..., tx)` ghi **trong cùng transaction** với thay đổi; audit lỗi → thay đổi bị huỷ (Constitution III).
-- Đăng nhập SV bằng mã: mọi lý do thất bại → cùng **401 `LOGIN_FAILED`** (FR-083). Rate limit: theo IP **chỉ đếm thất bại 50/5 phút** + trần tổng 300/5 phút (đầy thì chặn mọi lượt từ IP trước khi tra cứu); theo mã chỉ đếm thất bại 5/5 phút; **API đã đăng nhập khoá theo tài khoản**, không theo IP (FR-081, R14). `security_events` lưu HMAC mã SV (hiện dùng `JWT_SECRET`).
+- Đăng nhập SV bằng mã: mọi lý do thất bại → cùng **401 `LOGIN_FAILED`** (FR-083). Rate limit: theo IP **chỉ đếm thất bại 50/5 phút** + trần tổng 300/5 phút (đầy thì chặn mọi lượt từ IP trước khi tra cứu); theo mã chỉ đếm thất bại 5/5 phút; **API đã đăng nhập khoá theo tài khoản**, không theo IP (FR-081, R14). `security_events` lưu HMAC mã SV bằng khoá riêng **`LOG_HMAC_SECRET`** (bắt buộc, ≥ 32 ký tự; `src/security/log-hmac.ts`), độc lập `JWT_SECRET`.
 - Đăng ký thẻ (FR-045…049, FR-045a): mã vạch, OCR dự phòng; họ tên OCR so bằng `namesMatch` (bắt buộc khớp chỉ khi mã đọc bằng OCR) + **mặt trực tiếp 3 khung có thử thách quay đầu**; **6 lượt/giờ**, lỗi kèm `remainingAttempts`.
 - Ngưỡng mặc định **chờ hiệu chỉnh T011**: `DUPLICATE_ABOVE` 0,45 · `CARD_ACCEPT_ABOVE` 0,5 (mặt trực tiếp ↔ thẻ) · chân dung tối thiểu 40 px, độ nét 0,02 (R1, R3).
 - Ảnh thẻ + chân dung **chỉ upload sau khi qua hết kiểm tra**; thẻ bị từ chối không lưu file/DB; khung mặt trực tiếp không bao giờ lưu (FR-051).
@@ -49,7 +49,7 @@
 - **PR #1** (`001-attendance-core` → `main`) đã mở, **chưa merge**; Vercel Preview build thành công.
 - **CI không tự chạy** khi push lên `main` (4 lần, 2026-11-07) và trên PR #1. Khối `on:` của `ci.yml` (đã in nguyên văn, đúng cú pháp): `push:` → `branches: [main]`; `pull_request:` (không lọc nhánh = mọi nhánh); `workflow_dispatch:`. Không có `concurrency`, không có `if` cấp job. Push lên nhánh tính năng không chạy CI là **đúng thiết kế** (push chỉ lọc `main`). GitHub đã ghi nhận `PullRequestEvent`; nguyên nhân chưa rõ. Bước tiếp: thêm tạm `.github/workflows/ping.yml` (`on: [push, pull_request]`, một bước `echo ok`), push lên nhánh PR — ping chạy mà CI không → lỗi trong `ci.yml`; ping cũng không chạy → phía GitHub/cài đặt repo (`gh api repos/{owner}/{repo}/actions/permissions`); xong xoá `ping.yml`. Chạy tay được: `gh workflow run CI --ref <nhánh>`.
 - Kiểm Preview cần `$env:VERCEL_BYPASS` (Preview có Deployment Protection, trả 302 sang SSO).
-- Chuyển HMAC log sang biến riêng `LOG_HMAC_SECRET` (code hiện **chưa** đọc biến này).
+- `LOG_HMAC_SECRET` đã có trong code — **cần đặt** ở `apps/web/.env.local` và Vercel (Preview + Production).
 - Đo cold/warm + bộ nhớ `POST /api/student/card` trên Preview (cục bộ: ~4,4 s / ~1,9 s, RSS ~600 MB); xác nhận đường dẫn model theo `process.cwd()` trên Vercel.
 - Theo người dùng: Preview và Production đang dùng chung một Supabase — cần tách.
 - Token `gh` thiếu quyền `workflow` → push sửa `ci.yml` phải qua Git Credential Manager (hoặc `gh auth refresh -s workflow`).

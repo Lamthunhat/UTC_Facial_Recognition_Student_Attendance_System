@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { useTestAppDb } from "@utc/database/testing";
 import { vnDateOf } from "@utc/shared/periods";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -13,6 +14,7 @@ import { readJson } from "../support/http";
  * Mọi lý do thất bại (không tồn tại, không thuộc lớp đang hoạt động, sai định dạng) trả CÙNG một phản hồi.
  */
 const O = "http://localhost";
+const LOG_KEY = "log-hmac-secret-log-hmac-secret-xxxxxx";
 const FAIL_MSG = "Không đăng nhập được. Kiểm tra lại mã sinh viên hoặc liên hệ giảng viên.";
 
 let ctx: Awaited<ReturnType<typeof useTestAppDb>>;
@@ -33,6 +35,7 @@ const daysFromToday = (n: number) => vnDateOf(new Date(Date.now() + n * 86_400_0
 
 beforeAll(async () => {
   process.env.JWT_SECRET = "integration-secret-integration-secret-xx";
+  process.env.LOG_HMAC_SECRET = LOG_KEY;
   ctx = await useTestAppDb();
   const q = <T>(sql: string, args: unknown[] = []) => ctx.pg.query<T>(sql, args).then((r) => r.rows);
   const [gv] = await q<{ id: string }>(`insert into users (email,password_hash,full_name,role) values ('gv@x','x','GV','instructor') returning id`);
@@ -132,6 +135,20 @@ describe("POST /api/auth/student/login", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].meta).toMatchObject({ kind: "student" });
     expect(JSON.stringify(rows[0].meta)).not.toContain("231239999");
+  });
+
+  it("dấu vân tay mã SV trong security_events dùng LOG_HMAC_SECRET, không phụ thuộc JWT_SECRET", async () => {
+    const saved = process.env.JWT_SECRET;
+    process.env.JWT_SECRET = "jwt-xoay-khoa-jwt-xoay-khoa-jwt-xoay-k";
+    try {
+      await login("231238888", "10.0.4.2");
+    } finally {
+      process.env.JWT_SECRET = saved;
+    }
+    const [row] = (await ctx.pg.query<{ meta: { fp: string } }>(
+      `select meta from security_events where type = 'login_failed' and ip = '10.0.4.2'`,
+    )).rows;
+    expect(row.meta.fp).toBe(createHmac("sha256", LOG_KEY).update("student-login:231238888").digest("hex").slice(0, 16));
   });
 
   it("rate limit theo IP chỉ đếm lượt THẤT BẠI: 50 lần/5 phút; sau đó MỌI lượt từ IP đó bị chặn (kể cả mã đúng — không để lộ mã đúng qua 200/429)", async () => {

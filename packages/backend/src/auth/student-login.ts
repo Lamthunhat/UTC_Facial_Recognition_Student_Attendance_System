@@ -1,5 +1,4 @@
 import "server-only";
-import { createHmac } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@utc/database";
 import { studentCards, students } from "@utc/database/schema";
@@ -7,6 +6,7 @@ import { CONSENT_VERSION } from "@utc/shared/consent";
 import { vnDateOf } from "@utc/shared/periods";
 import { HttpError } from "../http/errors";
 import { recordSecurityEvent } from "../security/events";
+import { logFingerprint } from "../security/log-hmac";
 import { assertNotLimited, enforce, hit, RULES } from "../security/rate-limit";
 
 /**
@@ -23,10 +23,8 @@ import { assertNotLimited, enforce, hit, RULES } from "../security/rate-limit";
 export const STUDENT_LOGIN_FAILED_MESSAGE = "Không đăng nhập được. Kiểm tra lại mã sinh viên hoặc liên hệ giảng viên.";
 export const studentLoginFailed = () => new HttpError(401, "LOGIN_FAILED", STUDENT_LOGIN_FAILED_MESSAGE);
 
-/** Băm có khoá mã SV để ghi nhật ký: nối được các lần dò cùng một mã mà không lưu mã (1e9 khả năng → băm thường dò ngược được). */
-function codeFingerprint(code: string) {
-  return createHmac("sha256", process.env.JWT_SECRET ?? "dev").update(`student-login:${code}`).digest("hex").slice(0, 16);
-}
+/** Băm có khoá (LOG_HMAC_SECRET) mã SV để ghi nhật ký — xem security/log-hmac.ts. */
+const codeFingerprint = (code: string) => logFingerprint("student-login", code);
 
 export interface StudentLoginResult {
   id: string;

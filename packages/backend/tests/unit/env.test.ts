@@ -8,6 +8,7 @@ const BASE = {
   SUPABASE_SERVICE_ROLE_KEY: "s".repeat(40),
   JWT_SECRET: "j".repeat(40),
   CRON_SECRET: "c".repeat(32),
+  LOG_HMAC_SECRET: "l".repeat(40),
 };
 
 describe("parseEnv", () => {
@@ -20,6 +21,20 @@ describe("parseEnv", () => {
 
   it("chuỗi rỗng coi như chưa cấu hình", () => {
     expect(parseEnv({ ...BASE, GOONG_API_KEY: "", ANTHROPIC_API_KEY: "  " }).GOONG_API_KEY).toBeUndefined();
+  });
+
+  it("LOG_HMAC_SECRET bắt buộc, ≥ 32 ký tự (không in giá trị)", () => {
+    const { LOG_HMAC_SECRET: _drop, ...rest } = BASE;
+    void _drop;
+    expect(() => parseEnv(rest)).toThrow(/LOG_HMAC_SECRET/);
+    let msg = "";
+    try {
+      parseEnv({ ...BASE, LOG_HMAC_SECRET: "ngan-qua" });
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    expect(msg).toMatch(/LOG_HMAC_SECRET/);
+    expect(msg).not.toContain("ngan-qua");
   });
 
   it("thiếu biến bắt buộc → lỗi chỉ nêu TÊN biến, không in giá trị", () => {

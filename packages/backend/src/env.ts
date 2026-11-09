@@ -20,6 +20,7 @@ const EnvSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(20),
   JWT_SECRET: z.string().min(32, "JWT_SECRET phải dài ít nhất 32 ký tự"),
   CRON_SECRET: z.string().min(16),
+  LOG_HMAC_SECRET: z.string().min(32, "LOG_HMAC_SECRET phải dài ít nhất 32 ký tự"), // HMAC mã SV trong security_events
   GOONG_API_KEY: optionalSecret, // US2 — địa chỉ trên ảnh bằng chứng
   ANTHROPIC_API_KEY: optionalSecret, // US7/US8 — trợ lý AI, trích xuất minh chứng
   FACE_MODELS_DIR: z.string().default("models"),

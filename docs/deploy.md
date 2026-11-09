@@ -29,6 +29,7 @@ Biến bí mật đánh dấu **Sensitive**. Không biến nào được có ti�
 | `SUPABASE_URL` | Có | Prod + Preview | Supabase → Project Settings → API → Project URL | Chỉ dùng ở server |
 | `SUPABASE_SERVICE_ROLE_KEY` | Có | Prod + Preview | Supabase → Project Settings → API keys → `service_role` (secret) | **Sensitive.** Toàn quyền DB/Storage — chỉ ở server, không bao giờ gửi về trình duyệt |
 | `JWT_SECRET` | Có | Prod + Preview | `openssl rand -base64 48` (hoặc `node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"`) | **Sensitive.** ≥ 32 ký tự. Khác nhau giữa Preview và Production (phiên preview không dùng được ở production). Đổi giá trị = đăng xuất mọi người |
+| `LOG_HMAC_SECRET` | Có | Prod + Preview | `openssl rand -base64 48` | **Sensitive.** ≥ 32 ký tự, **khác** `JWT_SECRET`. Khoá HMAC mã SV ghi trong `security_events` (nối các lần dò cùng một mã mà không lưu mã). Thiếu → đăng nhập SV thất bại trả 500. Giữ cố định: đổi giá trị = log cũ và mới không nối được với nhau (không ảnh hưởng phiên đăng nhập) |
 | `CRON_SECRET` | Có | Prod + Preview | `openssl rand -hex 32` | **Sensitive.** Bảo vệ route cron và route spike |
 | `ENABLE_EXPERIMENTAL_COREPACK` | Nên có | Prod + Preview | Đặt `1` | Để Vercel dùng đúng `pnpm@10.28.0` khai trong `package.json` (`packageManager`) |
 | `FACE_MODELS_DIR` | Không | — | Đường dẫn tuyệt đối | Để trống (mặc định `<thư mục chạy>/models`). Chỉ đặt nếu log báo không tìm thấy `.onnx` — xem §7 |
