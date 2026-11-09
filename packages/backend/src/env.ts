@@ -13,13 +13,11 @@ const threshold = z.coerce.number().min(0).max(1);
 /** Chuỗi rỗng / toàn khoảng trắng coi như chưa đặt. */
 const optionalSecret = z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.string().trim().optional());
 
-const EnvSchema = z.object({
+/** Biến dùng chung cho mọi môi trường. JWT_SECRET, LOG_HMAC_SECRET luôn bắt buộc. */
+const base = {
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   DATABASE_URL: z.string().url(),
-  SUPABASE_URL: z.string().url(),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().min(20),
   JWT_SECRET: z.string().min(32, "JWT_SECRET phải dài ít nhất 32 ký tự"),
-  CRON_SECRET: z.string().min(16),
   LOG_HMAC_SECRET: z.string().min(32, "LOG_HMAC_SECRET phải dài ít nhất 32 ký tự"), // HMAC mã SV trong security_events
   GOONG_API_KEY: optionalSecret, // US2 — địa chỉ trên ảnh bằng chứng
   ANTHROPIC_API_KEY: optionalSecret, // US7/US8 — trợ lý AI, trích xuất minh chứng
@@ -30,19 +28,49 @@ const EnvSchema = z.object({
   CHECKIN_MATCH_ABOVE: threshold.default(0.55),
   LEAVE_FIELD_CONFIDENCE: threshold.default(0.8),
   LEAVE_CHAT_APPROVAL_CONFIDENCE: threshold.default(0.85),
+};
+/** Storage + cron: bắt buộc với Postgres (Supabase/Vercel). */
+const hosted = {
+  SUPABASE_URL: z.string().url(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(20),
+  CRON_SECRET: z.string().min(16),
+};
+const HostedSchema = z.object({ ...base, ...hosted });
+/**
+ * `DATABASE_URL=pglite:` chỉ dùng cục bộ (README: chạy thử chỉ cần DATABASE_URL + JWT_SECRET + LOG_HMAC_SECRET):
+ * storage/cron tuỳ chọn — tính năng cần tới tự báo thiếu khi dùng (evidence/storage.ts).
+ */
+const LocalSchema = z.object({
+  ...base,
+  SUPABASE_URL: hosted.SUPABASE_URL.optional(),
+  SUPABASE_SERVICE_ROLE_KEY: hosted.SUPABASE_SERVICE_ROLE_KEY.optional(),
+  CRON_SECRET: hosted.CRON_SECRET.optional(),
 });
 
-export type Env = z.infer<typeof EnvSchema>;
+export type Env = z.infer<typeof LocalSchema>;
 
-/** Kiểm một nguồn biến môi trường (thuần, dùng cho env() và test). Lỗi chỉ nêu tên biến + lý do, không in giá trị. */
+/** Lỗi cấu hình: `names` = tên các biến sai/thiếu (không bao giờ chứa giá trị). */
+export class EnvError extends Error {
+  constructor(
+    message: string,
+    readonly names: string[],
+  ) {
+    super(message);
+    this.name = "EnvError";
+  }
+}
+
+/** Kiểm một nguồn biến môi trường (thuần, dùng cho env(), kiểm khởi động và test). Lỗi chỉ nêu tên biến + lý do, không in giá trị. */
 export function parseEnv(source: Record<string, string | undefined>): Env {
-  const parsed = EnvSchema.safeParse(source);
+  const schema = source.DATABASE_URL?.startsWith("pglite:") ? LocalSchema : HostedSchema;
+  const parsed = schema.safeParse(source);
   if (!parsed.success) {
+    const names = [...new Set(parsed.error.issues.map((i) => String(i.path[0])))];
     const issues = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("\n");
-    throw new Error(`Biến môi trường không hợp lệ:\n${issues}`);
+    throw new EnvError(`Biến môi trường không hợp lệ:\n${issues}`, names);
   }
   if (parsed.data.CARD_REJECT_BELOW >= parsed.data.CARD_ACCEPT_ABOVE) {
-    throw new Error("CARD_REJECT_BELOW phải nhỏ hơn CARD_ACCEPT_ABOVE");
+    throw new EnvError("CARD_REJECT_BELOW phải nhỏ hơn CARD_ACCEPT_ABOVE", ["CARD_REJECT_BELOW", "CARD_ACCEPT_ABOVE"]);
   }
   return parsed.data;
 }

@@ -29,7 +29,7 @@ Biến bí mật đánh dấu **Sensitive**. Không biến nào được có ti�
 | `SUPABASE_URL` | Có | Prod + Preview | Supabase → Project Settings → API → Project URL | Chỉ dùng ở server |
 | `SUPABASE_SERVICE_ROLE_KEY` | Có | Prod + Preview | Supabase → Project Settings → API keys → `service_role` (secret) | **Sensitive.** Toàn quyền DB/Storage — chỉ ở server, không bao giờ gửi về trình duyệt |
 | `JWT_SECRET` | Có | Prod + Preview | `openssl rand -base64 48` (hoặc `node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"`) | **Sensitive.** ≥ 32 ký tự. Khác nhau giữa Preview và Production (phiên preview không dùng được ở production). Đổi giá trị = đăng xuất mọi người |
-| `LOG_HMAC_SECRET` | Có | Prod + Preview | `openssl rand -base64 48` | **Sensitive.** ≥ 32 ký tự, **khác** `JWT_SECRET`. Khoá HMAC mã SV ghi trong `security_events` (nối các lần dò cùng một mã mà không lưu mã). Thiếu → đăng nhập SV thất bại trả 500. Giữ cố định: đổi giá trị = log cũ và mới không nối được với nhau (không ảnh hưởng phiên đăng nhập) |
+| `LOG_HMAC_SECRET` | Có | Prod + Preview | `openssl rand -base64 48` | **Sensitive.** ≥ 32 ký tự, **khác** `JWT_SECRET`. Khoá HMAC mã SV ghi trong `security_events` (nối các lần dò cùng một mã mà không lưu mã). Thiếu/ngắn → server không khởi động (xem dòng "Biến môi trường" ở §7). Giữ cố định: đổi giá trị = log cũ và mới không nối được với nhau (không ảnh hưởng phiên đăng nhập) |
 | `CRON_SECRET` | Có | Prod + Preview | `openssl rand -hex 32` | **Sensitive.** Bảo vệ route cron và route spike |
 | `ENABLE_EXPERIMENTAL_COREPACK` | Nên có | Prod + Preview | Đặt `1` | Để Vercel dùng đúng `pnpm@10.28.0` khai trong `package.json` (`packageManager`) |
 | `FACE_MODELS_DIR` | Không | — | Đường dẫn tuyệt đối | Để trống (mặc định `<thư mục chạy>/models`). Chỉ đặt nếu log báo không tìm thấy `.onnx` — xem §7 |
@@ -123,6 +123,7 @@ Ghi kết quả (thời gian, số đo) vào PR/issue deploy. Thay `<url>` bằn
 
 - [ ] **Build log có `pnpm check:traces` → `Đủ file.`** — trên Vercel (Linux) script kiểm thêm `onnxruntime` và `sharp` bản linux-x64. Thiếu bất kỳ mục nào thì build đã fail; nếu không thấy dòng này, kiểm lại `buildCommand`.
 - [ ] **Function sống, chưa cần DB**: `curl -i <url>/api/me` → `401` JSON `UNAUTHORIZED` (không phải 500/404).
+- [ ] **Biến môi trường**: server kiểm biến lúc khởi động (`apps/web/src/instrumentation.ts`). Thiếu/sai → log function có dòng `{"msg":"env_invalid","names":[...]}` (chỉ tên biến) và **mọi request trả 500** — sửa biến trong Vercel rồi redeploy. Với Postgres bắt buộc: `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `JWT_SECRET`, `CRON_SECRET`, `LOG_HMAC_SECRET`.
 - [ ] **Header bảo mật**: `curl -I <url>/` có HSTS, CSP, `X-Content-Type-Options: nosniff`, `frame-ancestors 'none'`, `Permissions-Policy`.
 - [ ] **DB + phiên**: đăng nhập Admin ở `/login` → `GET /api/me` trả `200` với vai trò admin.
 - [ ] **Đăng ký thẻ thử (đường đọc thẻ đầy đủ)**: tạo một giảng viên thử, một lớp đang học, thêm một SV thử bằng mã giả; đăng nhập SV (`/sv` hoặc `POST /api/auth/student/login`), đồng ý điều khoản, lấy nonce, gửi `POST /api/student/card` với **một ảnh JPEG ≤ 1 MB không có mặt người** (ví dụ ảnh chụp một trang giấy) + 3 khung bất kỳ.

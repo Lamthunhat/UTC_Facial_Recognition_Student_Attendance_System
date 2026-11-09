@@ -7,6 +7,7 @@ import { POST as cardNonce } from "../../src/api/student/card-nonce";
 import { CONSENT_VERSION } from "@utc/shared/consent";
 import { getSession, revokeSession } from "../../src/auth/session";
 import { NO_PARAMS } from "../../src/http/handler";
+import { checkEnvOnStartup } from "../../src/startup";
 import { readJson } from "../support/http";
 
 /**
@@ -135,6 +136,15 @@ describe("POST /api/auth/student/login", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].meta).toMatchObject({ kind: "student" });
     expect(JSON.stringify(rows[0].meta)).not.toContain("231239999");
+  });
+
+  it("đủ biến (qua kiểm khởi động) → mã SV sai vẫn 401 LOGIN_FAILED, không 500", async () => {
+    expect(() =>
+      checkEnvOnStartup({ DATABASE_URL: "pglite:./.pglite", JWT_SECRET: process.env.JWT_SECRET, LOG_HMAC_SECRET: process.env.LOG_HMAC_SECRET }),
+    ).not.toThrow();
+    const res = await login("231237777", "10.0.4.3");
+    expect(res.status).toBe(401);
+    expect(await readJson(res)).toMatchObject({ error: { code: "LOGIN_FAILED", message: FAIL_MSG } });
   });
 
   it("dấu vân tay mã SV trong security_events dùng LOG_HMAC_SECRET, không phụ thuộc JWT_SECRET", async () => {
