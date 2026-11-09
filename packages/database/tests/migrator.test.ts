@@ -9,7 +9,7 @@ import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 import { unaccent } from "@electric-sql/pglite/contrib/unaccent";
 import { vector } from "@electric-sql/pglite-pgvector";
 import { afterAll, describe, expect, it } from "vitest";
-import { MIGRATIONS_TABLE, pgliteExecutor, runMigrations } from "../src/migrator";
+import { loadMigrations, MIGRATIONS_TABLE, pgliteExecutor, runMigrations } from "../src/migrator";
 
 /**
  * Runner migration dùng chung (pglite + Postgres): bảng theo dõi của Drizzle, mỗi file một transaction,
@@ -135,5 +135,30 @@ describe("runMigrations", () => {
     const pg = await emptyDb();
     await expect(runMigrations(pgliteExecutor(pg), { dir })).rejects.toThrow(/0001_hardening/);
     expect((await pg.query(`select to_regclass('public.users') as t`)).rows[0]).toEqual({ t: null });
+  });
+
+  it("thiếu nhiều file → báo ĐỦ các file thiếu theo thứ tự journal, kết quả như nhau mọi lần (không phụ thuộc I/O nào xong trước)", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "mig-"));
+    temps.push(dir);
+    await mkdir(path.join(dir, "meta"));
+    await copyFile(path.join(DIR, "meta/_journal.json"), path.join(dir, "meta/_journal.json"));
+    await copyFile(path.join(DIR, "0000_init.sql"), path.join(dir, "0000_init.sql"));
+    const journal = JSON.parse(await readFile(path.join(DIR, "meta/_journal.json"), "utf8")) as { entries: { idx: number; tag: string }[] };
+    const missing = journal.entries.sort((a, b) => a.idx - b.idx).map((e) => `${e.tag}.sql`).filter((f) => f !== "0000_init.sql");
+    expect(missing.length).toBeGreaterThanOrEqual(2); // phép thử chỉ có nghĩa khi thiếu ≥ 2 file
+    const messages = new Set<string>();
+    for (let i = 0; i < 20; i++) {
+      const err = await loadMigrations(dir).then(
+        () => null,
+        (e: Error) => e.message,
+      );
+      expect(err).not.toBeNull();
+      messages.add(err!);
+    }
+    expect(messages.size).toBe(1);
+    const [msg] = messages;
+    const positions = missing.map((f) => msg.indexOf(f));
+    expect(positions.every((p) => p >= 0), msg).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
   });
 });

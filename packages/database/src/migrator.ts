@@ -61,22 +61,20 @@ export async function loadMigrations(dir: string): Promise<Migration[]> {
     entries: { idx: number; tag: string; when: number }[];
   };
   const entries = [...journal.entries].sort((a, b) => a.idx - b.idx);
-  return Promise.all(
-    entries.map(async (e) => {
-      let content: string;
-      try {
-        content = await readFile(path.join(dir, `${e.tag}.sql`), "utf8");
-      } catch {
-        throw new Error(`Thiếu file migration ${e.tag}.sql trong ${dir}`);
-      }
-      return {
-        tag: e.tag,
-        when: e.when,
-        hash: createHash("sha256").update(content).digest("hex"),
-        statements: content.split("--> statement-breakpoint").filter((s) => s.trim()),
-      };
-    }),
-  );
+  // Đọc song song nhưng CHỜ HẾT rồi mới báo lỗi (allSettled, không Promise.all): thông báo liệt kê đủ file thiếu theo
+  // thứ tự journal, không phụ thuộc lần đọc nào thất bại trước.
+  const reads = await Promise.allSettled(entries.map((e) => readFile(path.join(dir, `${e.tag}.sql`), "utf8")));
+  const missing = entries.filter((_, i) => reads[i].status === "rejected").map((e) => `${e.tag}.sql`);
+  if (missing.length) throw new Error(`Thiếu file migration ${missing.join(", ")} trong ${dir}`);
+  return entries.map((e, i) => {
+    const content = (reads[i] as PromiseFulfilledResult<string>).value;
+    return {
+      tag: e.tag,
+      when: e.when,
+      hash: createHash("sha256").update(content).digest("hex"),
+      statements: content.split("--> statement-breakpoint").filter((s) => s.trim()),
+    };
+  });
 }
 
 /**
