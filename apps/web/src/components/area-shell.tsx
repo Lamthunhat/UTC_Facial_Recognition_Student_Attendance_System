@@ -5,10 +5,13 @@ export function AreaShell({
   title,
   nav,
   children,
+  logoutTo = "/login",
 }: {
   title: string;
   nav: { href: string; label: string }[];
   children: React.ReactNode;
+  /** Trang về sau khi đăng xuất (SV: /sv). */
+  logoutTo?: string;
 }) {
   return (
     <div className="min-h-dvh">
@@ -24,7 +27,7 @@ export function AreaShell({
               </Link>
             ))}
           </nav>
-          <LogoutButton to="/login" />
+          <LogoutButton to={logoutTo} />
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
