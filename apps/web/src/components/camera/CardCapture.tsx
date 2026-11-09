@@ -1,31 +1,32 @@
 "use client";
 
-import { Camera, ImageUp } from "lucide-react";
+import { Camera } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/input";
-import { CARD_IMAGE, CARD_MIN_LONG_EDGE, cardGuideRect, cropLongEdgeOk, guideCrop } from "@/lib/student/image";
-import { captureVideo, compressFile } from "@/lib/student/image-browser";
+import { CARD_IMAGE, cardCropVerdict, cardGuideRect, guideCrop } from "@/lib/student/image";
+import { captureCard } from "@/lib/student/image-browser";
+import { detectInAppBrowser, inAppBrowserHint } from "@/lib/student/webview";
 import { useCamera } from "./use-camera";
 
 /**
- * T063 — Chụp mặt trước thẻ SV bằng camera sau (FR-045: chụp trực tiếp). Thẻ SV UTC là thẻ DỌC (CR80 54 × 85,6):
- * khung hướng dẫn dọc cao ~80 % vùng xem trước, căn giữa, bóng mờ bên ngoài — đúng tỉ lệ trên cả điện thoại dọc lẫn
- * webcam ngang. Ảnh gửi đi = vùng cắt theo khung (+ lề nhỏ), nén ≤ 1 MB, cạnh dài ≤ 1600 px.
- * Vùng cắt có cạnh dài < 1000 px điểm ảnh gốc (camera độ phân giải thấp) → nhắc, cho chụp lại hoặc vẫn dùng.
- * Fallback `<input capture=environment>` CHỈ trên thiết bị cảm ứng khi không mở được camera trong trang (FR-045).
+ * T063 — Chụp mặt trước thẻ SV bằng camera sau, CHỈ chụp trực tiếp trong trang (FR-045: không có chọn file / ứng dụng
+ * camera). Thẻ SV UTC là thẻ DỌC (CR80 54 × 85,6): khung hướng dẫn dọc cao ~80 % vùng xem, căn giữa, bóng mờ ngoài.
+ * Ảnh gửi = vùng cắt theo khung (ImageCapture.takePhoto nếu được, không thì khung video), nén ≤ 1 MB.
+ * Cạnh dài vùng cắt (điểm ảnh gốc): < 500 chặn · 500–999 cảnh báo + "Vẫn dùng ảnh này" · ≥ 1000 dùng luôn (research R3).
+ * Mở trong webview (Zalo, Facebook…) → hướng dẫn mở bằng Chrome/Safari.
  */
 export function CardCapture({ onCaptured }: { onCaptured: (card: Blob) => void }) {
-  const { videoRef, state, start, stop } = useCamera("environment", { width: 2560, height: 1440 });
+  const { videoRef, state, start, stop, track } = useCamera("environment", { width: 2560, height: 1440 });
   const viewRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<{ w: number; h: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lowRes, setLowRes] = useState<{ blob: Blob; px: number } | null>(null);
-  const [coarse, setCoarse] = useState(false);
+  const [small, setSmall] = useState<{ blob: Blob; px: number } | null>(null);
+  const [webview, setWebview] = useState<string | null>(null);
 
   useEffect(() => {
-    setCoarse(window.matchMedia("(pointer: coarse)").matches);
+    setWebview(detectInAppBrowser(navigator.userAgent));
     void start();
   }, [start]);
 
@@ -49,28 +50,21 @@ export function CardCapture({ onCaptured }: { onCaptured: (card: Blob) => void }
     setError(null);
     try {
       const region = guideCrop({ videoW: video.videoWidth, videoH: video.videoHeight, viewW: view.w, viewH: view.h }, guide, 0.04);
-      const blob = await captureVideo(video, CARD_IMAGE, region);
-      if (!cropLongEdgeOk(region)) {
-        setLowRes({ blob, px: Math.max(region.width, region.height) });
-        setBusy(false);
+      const shot = await captureCard(video, track(), region, CARD_IMAGE);
+      const verdict = cardCropVerdict(shot.longEdge);
+      setBusy(false);
+      if (verdict === "block") {
+        setError(`Ảnh thẻ quá nhỏ (${shot.longEdge} px) — không đọc được. Hãy dùng camera điện thoại để chụp thẻ.`);
+        return;
+      }
+      if (verdict === "warn") {
+        setSmall({ blob: shot.blob, px: shot.longEdge });
         return;
       }
       stop();
-      onCaptured(blob);
+      onCaptured(shot.blob);
     } catch {
       setError("Không chụp được ảnh. Vui lòng thử lại.");
-      setBusy(false);
-    }
-  }
-
-  async function fromFile(file: File | undefined) {
-    if (!file) return;
-    setBusy(true);
-    setError(null);
-    try {
-      onCaptured(await compressFile(file, CARD_IMAGE));
-    } catch {
-      setError("Không đọc được ảnh vừa chụp. Vui lòng chụp lại.");
       setBusy(false);
     }
   }
@@ -78,6 +72,7 @@ export function CardCapture({ onCaptured }: { onCaptured: (card: Blob) => void }
   const failed = state.status === "error";
   return (
     <div className="flex flex-col gap-3">
+      {webview && <Alert>{inAppBrowserHint(webview)}</Alert>}
       <p className="text-sm">
         Chụp <strong>mặt trước thẻ sinh viên</strong> (mặt có ảnh), nơi đủ sáng, không bị loá, rồi bấm Chụp.
       </p>
@@ -104,22 +99,19 @@ export function CardCapture({ onCaptured }: { onCaptured: (card: Blob) => void }
       )}
       {failed && <Alert>{state.message}</Alert>}
       {error && <Alert>{error}</Alert>}
-      {lowRes && (
+      {small ? (
         <div className="flex flex-col gap-2">
-          <Alert>
-            Ảnh thẻ chưa đủ nét ({lowRes.px} px, cần ≥ {CARD_MIN_LONG_EDGE} px): đưa thẻ lại gần cho vừa khung, giữ chắc tay. Camera máy
-            này có độ phân giải thấp — nếu được, hãy dùng camera điện thoại.
-          </Alert>
+          <Alert>Ảnh hơi nhỏ ({small.px} px), nên dùng camera điện thoại để mã và chữ trên thẻ đọc được chắc chắn.</Alert>
           <div className="flex gap-2">
-            <Button variant="outline" className="flex-1" onClick={() => setLowRes(null)}>
+            <Button variant="outline" className="flex-1" onClick={() => setSmall(null)}>
               Chụp lại
             </Button>
             <Button
               variant="ghost"
               className="flex-1"
               onClick={() => {
-                const b = lowRes.blob;
-                setLowRes(null);
+                const b = small.blob;
+                setSmall(null);
                 stop();
                 onCaptured(b);
               }}
@@ -128,8 +120,7 @@ export function CardCapture({ onCaptured }: { onCaptured: (card: Blob) => void }
             </Button>
           </div>
         </div>
-      )}
-      {!lowRes && (
+      ) : (
         <div className="flex flex-wrap gap-2">
           {!failed && (
             <Button onClick={capture} disabled={state.status !== "live" || busy || !guide} className="flex-1 py-3 text-base">
@@ -142,19 +133,6 @@ export function CardCapture({ onCaptured }: { onCaptured: (card: Blob) => void }
             </Button>
           )}
         </div>
-      )}
-      {failed && coarse && (
-        <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-border px-4 py-3 text-sm font-semibold hover:bg-muted">
-          <ImageUp className="size-5" aria-hidden /> Chụp bằng ứng dụng camera của máy
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="sr-only"
-            disabled={busy}
-            onChange={(e) => void fromFile(e.currentTarget.files?.[0])}
-          />
-        </label>
       )}
     </div>
   );

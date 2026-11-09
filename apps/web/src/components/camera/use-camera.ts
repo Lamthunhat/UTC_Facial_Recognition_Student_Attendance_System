@@ -64,11 +64,12 @@ export function useCamera(facing: "environment" | "user", ideal: { width: number
     return () => {
       document.removeEventListener("visibilitychange", onHide);
       window.removeEventListener("pagehide", stop);
-      requestRef.current++; // luồng đang chờ cấp quyền sẽ bị tắt khi về
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
+      stop(); // tắt track; luồng đang chờ cấp quyền cũng bị tắt khi về (số thứ tự yêu cầu đã đổi)
     };
   }, [stop]);
 
-  return { videoRef, state, start, stop };
+  /** Track video đang chạy (cho ImageCapture.takePhoto / trang chẩn đoán). */
+  const track = useCallback(() => streamRef.current?.getVideoTracks()[0] ?? null, []);
+
+  return { videoRef, state, start, stop, track };
 }

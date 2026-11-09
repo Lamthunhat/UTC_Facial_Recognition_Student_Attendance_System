@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cardGuideRect, CARD_ASPECT, CARD_MIN_LONG_EDGE, compressImage, cropLongEdgeOk, fitWithin, guideCrop, requestFits, CARD_IMAGE, FACE_FRAME, REQUEST_MAX_BYTES } from "@/lib/student/image";
+import { aspectsMatch, cardCropVerdict, CARD_BLOCK_LONG_EDGE, scaleRegion, cardGuideRect, CARD_ASPECT, CARD_MIN_LONG_EDGE, compressImage, cropLongEdgeOk, fitWithin, guideCrop, requestFits, CARD_IMAGE, FACE_FRAME, REQUEST_MAX_BYTES } from "@/lib/student/image";
 
 /** Nén ảnh ở trình duyệt: thuật toán thuần, bộ mã hoá JPEG được truyền vào (trình duyệt dùng canvas). */
 describe("fitWithin — cạnh dài tối đa, giữ tỉ lệ, không phóng to", () => {
@@ -142,5 +142,33 @@ describe("vùng cắt theo khung dọc → ảnh gửi đi đúng tỉ lệ th�
     const crop = guideCrop({ videoW: 1280, videoH: 720, ...view }, cardGuideRect(view.viewW, view.viewH));
     expect(Math.max(crop.width, crop.height)).toBeLessThan(CARD_MIN_LONG_EDGE);
     expect(cropLongEdgeOk(crop)).toBe(false);
+  });
+});
+
+describe("cardCropVerdict — ngưỡng cạnh dài vùng thẻ cắt ra", () => {
+  it("< 500 px → chặn; 500–999 → cảnh báo; ≥ 1000 → ổn", () => {
+    expect(CARD_BLOCK_LONG_EDGE).toBe(500);
+    expect(cardCropVerdict(499)).toBe("block");
+    expect(cardCropVerdict(500)).toBe("warn");
+    expect(cardCropVerdict(999)).toBe("warn");
+    expect(cardCropVerdict(1000)).toBe("ok");
+  });
+});
+
+describe("ImageCapture.takePhoto — ánh xạ vùng cắt từ khung video sang ảnh chụp độ phân giải cao", () => {
+  it("cùng tỉ lệ → nhân hệ số", () => {
+    expect(aspectsMatch({ width: 1920, height: 1080 }, { width: 4032, height: 2268 })).toBe(true);
+    expect(scaleRegion({ x: 100, y: 50, width: 300, height: 476 }, { width: 1920, height: 1080 }, { width: 3840, height: 2160 })).toEqual({
+      x: 200,
+      y: 100,
+      width: 600,
+      height: 952,
+    });
+  });
+  it("khác tỉ lệ (ảnh 4:3, video 16:9 — góc nhìn khác) → không dùng ảnh chụp", () => {
+    expect(aspectsMatch({ width: 1920, height: 1080 }, { width: 4000, height: 3000 })).toBe(false);
+  });
+  it("ảnh chụp xoay so với video (dọc ↔ ngang) → không khớp", () => {
+    expect(aspectsMatch({ width: 1080, height: 1920 }, { width: 4032, height: 2268 })).toBe(false);
   });
 });

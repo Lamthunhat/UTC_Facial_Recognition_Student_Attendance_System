@@ -72,6 +72,30 @@ export function cropLongEdgeOk(crop: { width: number; height: number }, min = CA
   return Math.max(crop.width, crop.height) >= min;
 }
 
+/** Dưới ngưỡng này không gửi (mã vạch/OCR gần như chắc chắn hỏng) — research R3. */
+export const CARD_BLOCK_LONG_EDGE = 500;
+
+/** Cạnh dài vùng thẻ cắt ra (điểm ảnh gốc): < 500 chặn · 500–999 cảnh báo, cho dùng · ≥ 1000 ổn. */
+export function cardCropVerdict(longEdge: number): "ok" | "warn" | "block" {
+  if (longEdge < CARD_BLOCK_LONG_EDGE) return "block";
+  return longEdge < CARD_MIN_LONG_EDGE ? "warn" : "ok";
+}
+
+type Size = { width: number; height: number };
+
+/** Hai khung cùng tỉ lệ (sai lệch tương đối ≤ tol) — ảnh takePhoto chỉ dùng được khi cùng góc nhìn với video. */
+export function aspectsMatch(a: Size, b: Size, tol = 0.02) {
+  const ra = a.width / a.height;
+  const rb = b.width / b.height;
+  return Math.abs(ra - rb) / ra <= tol;
+}
+
+/** Vùng cắt theo toạ độ video → toạ độ ảnh chụp (cùng tỉ lệ). */
+export function scaleRegion(r: { x: number; y: number; width: number; height: number }, from: Size, to: Size) {
+  const k = to.width / from.width;
+  return { x: Math.round(r.x * k), y: Math.round(r.y * k), width: Math.round(r.width * k), height: Math.round(r.height * k) };
+}
+
 /**
  * Khung hướng dẫn vẽ trên màn hình (video `object-fit: cover`) → vùng cắt tương ứng trên ảnh gốc của video,
  * nới thêm `margin` (tỉ lệ) mỗi phía để không cắt sát mép thẻ; kẹp trong ảnh.

@@ -67,6 +67,17 @@ describe("cardFlow", () => {
     expect(stop).toEqual({ step: "blocked", notice: { action: "stop", message: "s" } });
   });
 
+  it("làm lại khuôn mặt → BẮT BUỘC nonce mới: không còn nonce cũ, khung bị bỏ qua tới khi có nonce mới", () => {
+    const sending = cardFlow(threeFrames(), { type: "SUBMIT", now: NOW });
+    const retry = cardFlow(sending, { type: "SUBMIT_FAILED", advice: { action: "retake-face", message: "f" } });
+    expect(retry.step).toBe("face-intro");
+    expect("nonce" in retry).toBe(false);
+    expect(cardFlow(retry, { type: "FRAME_CAPTURED", frame: blob() })).toBe(retry);
+    expect(cardFlow(retry, { type: "SUBMIT", now: NOW })).toBe(retry);
+    const fresh = cardFlow(retry, { ...nonceEvt, nonce: "n2" });
+    expect(fresh).toMatchObject({ step: "face", nonce: "n2", frames: [] });
+  });
+
   it("RESTART từ bất kỳ bước nào → chụp thẻ, không còn ảnh", () => {
     expect(cardFlow(threeFrames(), { type: "RESTART" })).toEqual({ step: "card" });
   });
