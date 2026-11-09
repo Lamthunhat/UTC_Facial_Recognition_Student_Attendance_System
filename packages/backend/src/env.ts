@@ -60,13 +60,22 @@ export class EnvError extends Error {
   }
 }
 
+/** Bản build production chạy cục bộ trên pglite (đo hiệu năng, thử khởi động) — bật bằng ALLOW_LOCAL_PGLITE=1, không bao giờ trên Vercel. */
+export function localPgliteAllowed(source: Record<string, string | undefined>): boolean {
+  return source.ALLOW_LOCAL_PGLITE === "1" && source.VERCEL !== "1";
+}
+
 /** Kiểm một nguồn biến môi trường (thuần, dùng cho env(), kiểm khởi động và test). Lỗi chỉ nêu tên biến + lý do, không in giá trị. */
 export function parseEnv(source: Record<string, string | undefined>): Env {
   const pglite = !!source.DATABASE_URL?.startsWith("pglite:");
   const problems: { name: string; message: string }[] = [];
   // Postgres nhúng chỉ cho dev cục bộ: dữ liệu nằm trên đĩa tạm của instance (mất khi scale/redeploy), một tiến trình.
-  if (pglite && (source.VERCEL === "1" || source.NODE_ENV === "production")) {
-    problems.push({ name: "DATABASE_URL", message: "DATABASE_URL: pglite: chỉ dùng cho dev cục bộ — không dùng trên Vercel/production" });
+  // Trên Vercel: luôn chặn. NODE_ENV=production ngoài Vercel (next start cục bộ): chỉ khi ALLOW_LOCAL_PGLITE=1.
+  if (pglite && (source.VERCEL === "1" || (source.NODE_ENV === "production" && !localPgliteAllowed(source)))) {
+    problems.push({
+      name: "DATABASE_URL",
+      message: "DATABASE_URL: pglite: chỉ dùng cho dev cục bộ — cấm trên Vercel; production cục bộ cần ALLOW_LOCAL_PGLITE=1",
+    });
   }
   const parsed = (pglite ? LocalSchema : HostedSchema).safeParse(source);
   if (!parsed.success) {

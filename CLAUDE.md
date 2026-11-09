@@ -29,7 +29,7 @@
 | 4 US6 thẻ SV | 10/12 | Backend xong (T053–T061, T064); **UI T062, T063 chưa làm** |
 | 5–11 (US2, US3, US5, US4, US9, US8, US7) | 0 | |
 | 12 Polish | 0/14 | Có T144 (Turnstile) |
-- Test (lần chạy gần nhất): backend **398**, database **50**, shared **22** — tổng 470, đều pass. `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm check:traces` pass.
+- Test (lần chạy gần nhất): backend **401**, database **50**, shared **22** — tổng 473, đều pass. `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm check:traces` pass.
 
 ### 4. Quyết định đã chốt
 - Body request ≤ **4 MB** (giới hạn 4,5 MB của Vercel): danh sách lớp 4 MB, ảnh thẻ 1 MB, mỗi khung mặt 1 MB (FR-090, FR-100, research R14).
@@ -43,7 +43,7 @@
 - Migration: runner chung `packages/database/src/migrator.ts` cho pglite và Postgres — mỗi file một transaction, bảng theo dõi của Drizzle, **tự baseline** DB kiểu cũ; thêm migration không cần xoá `.pglite`.
 - Script ghi DB (`packages/database/src/db-target.ts`): `db:seed:demo` **chỉ DB cục bộ** (cấm production/Supabase/remote); `db:migrate`, `admin:create` lên remote cần `CONFIRM_REMOTE_DB=true`.
 - Đóng gói Vercel: `next.config.ts` phân giải đường dẫn thật của wasm/dữ liệu OCR; `pnpm check:traces` chạy trong CI và trong `buildCommand`.
-- Biến môi trường kiểm **lúc khởi động** (`apps/web/src/instrumentation.ts` → `checkEnvOnStartup` trong `packages/backend/src/startup.ts`, chỉ runtime nodejs; không chạy lúc `next build`): thiếu/sai → log `env_invalid` chỉ tên biến, mọi request 500 (Next 15 không thoát tiến trình). `pglite:` chỉ bắt buộc `DATABASE_URL`, `JWT_SECRET`, `LOG_HMAC_SECRET` và **bị chặn khi `VERCEL=1` hoặc `NODE_ENV=production`** (kể cả `next start` cục bộ); Postgres bắt buộc thêm `SUPABASE_*`, `CRON_SECRET`.
+- Biến môi trường kiểm **lúc khởi động** (`apps/web/src/instrumentation.ts` → `checkEnvOnStartup` trong `packages/backend/src/startup.ts`, chỉ runtime nodejs; không chạy lúc `next build`): thiếu/sai → log `env_invalid` chỉ tên biến, mọi request 500 (Next 15 không thoát tiến trình). `pglite:` chỉ bắt buộc `DATABASE_URL`, `JWT_SECRET`, `LOG_HMAC_SECRET`; `VERCEL=1` + `pglite:` **luôn bị chặn**; `NODE_ENV=production` + `pglite:` (vd. `next start` cục bộ) chỉ chạy khi `ALLOW_LOCAL_PGLITE=1` (log warn `pglite_production_local`); Postgres bắt buộc thêm `SUPABASE_*`, `CRON_SECRET`.
 - CodeQL: repo private → `upload: never` + `.github/scripts/codeql-gate.mjs` chặn theo SARIF.
 
 ### 5. Đang dở

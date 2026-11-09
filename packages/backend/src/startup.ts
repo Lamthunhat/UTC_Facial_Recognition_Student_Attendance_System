@@ -1,5 +1,5 @@
 import "server-only";
-import { EnvError, parseEnv, type Env } from "./env";
+import { EnvError, localPgliteAllowed, parseEnv, type Env } from "./env";
 import { log } from "./log";
 
 /**
@@ -8,10 +8,15 @@ import { log } from "./log";
  * thay vì chỉ lỗi 500 khi một nhánh hiếm (vd. đăng nhập SV thất bại cần LOG_HMAC_SECRET) chạy tới.
  */
 export function checkEnvOnStartup(source: Record<string, string | undefined> = process.env): Env {
+  let parsed: Env;
   try {
-    return parseEnv(source);
+    parsed = parseEnv(source);
   } catch (e) {
     log.error("env_invalid", { names: e instanceof EnvError ? e.names : [] });
     throw e;
   }
+  if (parsed.NODE_ENV === "production" && source.DATABASE_URL?.startsWith("pglite:") && localPgliteAllowed(source)) {
+    log.warn("pglite_production_local", { hint: "ALLOW_LOCAL_PGLITE=1 — chỉ dùng cục bộ, không cho người dùng thật" });
+  }
+  return parsed;
 }

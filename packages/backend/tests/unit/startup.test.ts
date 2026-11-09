@@ -70,9 +70,40 @@ describe("checkEnvOnStartup", () => {
     expect(JSON.parse(errors[0])).toMatchObject({ msg: "env_invalid", names: ["DATABASE_URL"] });
   });
 
-  it("pglite với NODE_ENV=production → env_invalid, tên DATABASE_URL", () => {
+  it("pglite với NODE_ENV=production (không ALLOW_LOCAL_PGLITE) → env_invalid, tên DATABASE_URL", () => {
     startupError({ ...PGLITE, NODE_ENV: "production" });
     expect(JSON.parse(errors[0]).names).toEqual(["DATABASE_URL"]);
+    startupError({ ...PGLITE, NODE_ENV: "production", ALLOW_LOCAL_PGLITE: "true" }); // chỉ đúng "1" mới mở
+    expect(JSON.parse(errors[1]).names).toEqual(["DATABASE_URL"]);
+  });
+
+  describe("ALLOW_LOCAL_PGLITE=1", () => {
+    let warns: string[] = [];
+    beforeEach(() => {
+      warns = [];
+      vi.stubEnv("NODE_ENV", "development"); // log bỏ qua warn khi NODE_ENV của tiến trình test là "test"
+      vi.spyOn(console, "warn").mockImplementation((line: string) => void warns.push(String(line)));
+    });
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("NODE_ENV=production + pglite → cho phép (next start cục bộ), log warn pglite_production_local", () => {
+      expect(() => checkEnvOnStartup({ ...PGLITE, NODE_ENV: "production", ALLOW_LOCAL_PGLITE: "1" })).not.toThrow();
+      expect(errors).toEqual([]);
+      expect(warns).toHaveLength(1);
+      expect(JSON.parse(warns[0])).toMatchObject({ level: "warn", msg: "pglite_production_local" });
+    });
+
+    it("VERCEL=1 + pglite → VẪN chặn, kể cả có ALLOW_LOCAL_PGLITE=1", () => {
+      startupError({ ...PGLITE, NODE_ENV: "production", VERCEL: "1", ALLOW_LOCAL_PGLITE: "1" });
+      expect(JSON.parse(errors[0])).toMatchObject({ msg: "env_invalid", names: ["DATABASE_URL"] });
+      expect(warns).toEqual([]);
+    });
+
+    it("dev/test hay Postgres → không warn", () => {
+      checkEnvOnStartup({ ...PGLITE, NODE_ENV: "development", ALLOW_LOCAL_PGLITE: "1" });
+      checkEnvOnStartup({ ...POSTGRES, NODE_ENV: "production", ALLOW_LOCAL_PGLITE: "1" });
+      expect(warns).toEqual([]);
+    });
   });
 
   it("pglite production còn thiếu biến khác → báo cả DATABASE_URL lẫn biến thiếu", () => {
