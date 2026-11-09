@@ -29,6 +29,13 @@ describe("storageMode", () => {
   it("có SUPABASE_URL → supabase (kể cả pglite)", () => {
     expect(storageMode({ DATABASE_URL: "pglite:./.pglite", SUPABASE_URL: "https://x.supabase.co" })).toBe("supabase");
   });
+  it("NODE_ENV=production + pglite → supabase (chặn kho cục bộ) — trừ khi ALLOW_LOCAL_PGLITE=1 (next start cục bộ)", () => {
+    expect(storageMode({ DATABASE_URL: "pglite:./.pglite", NODE_ENV: "production" })).toBe("supabase");
+    expect(storageMode({ DATABASE_URL: "pglite:./.pglite", NODE_ENV: "production", ALLOW_LOCAL_PGLITE: "true" })).toBe("supabase");
+    expect(storageMode({ DATABASE_URL: "pglite:./.pglite", NODE_ENV: "production", ALLOW_LOCAL_PGLITE: "1" })).toBe("local");
+    expect(storageMode({ DATABASE_URL: "pglite:./.pglite", NODE_ENV: "production", ALLOW_LOCAL_PGLITE: "1", VERCEL: "1" })).toBe("supabase");
+  });
+
   it("trên Vercel hoặc Postgres → supabase (không bao giờ ghi đĩa cục bộ)", () => {
     expect(storageMode({ DATABASE_URL: "pglite:./.pglite", VERCEL: "1" })).toBe("supabase");
     expect(storageMode({ DATABASE_URL: "postgresql://u:p@h/db" })).toBe("supabase");

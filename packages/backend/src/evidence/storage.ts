@@ -11,12 +11,16 @@ export type Bucket = "evidence" | "cards" | "leave" | "disputes";
 const SIGNED_URL_TTL_SEC = 300;
 
 /**
- * Chế độ kho: "local" CHỈ khi dev cục bộ — DATABASE_URL=pglite:, không có SUPABASE_URL, không chạy trên Vercel.
+ * Chế độ kho: "local" CHỈ khi dev cục bộ — DATABASE_URL=pglite:, không có SUPABASE_URL, không chạy trên Vercel, và
+ * không phải production (trừ next start cục bộ có ALLOW_LOCAL_PGLITE=1).
  * Khi đó file nằm trong LOCAL_STORAGE_DIR (mặc định `<cwd>/.local-storage`, gitignore) và "signed URL" là data: URL
  * (CSP img-src có data:). Mọi trường hợp khác dùng Supabase (thiếu cấu hình → lỗi như trước).
  */
 export function storageMode(source: Record<string, string | undefined> = process.env): "local" | "supabase" {
-  return source.DATABASE_URL?.startsWith("pglite:") && !source.SUPABASE_URL && source.VERCEL !== "1" ? "local" : "supabase";
+  if (!source.DATABASE_URL?.startsWith("pglite:") || source.SUPABASE_URL || source.VERCEL === "1") return "supabase";
+  // production (next start) chỉ dùng kho cục bộ khi được bật rõ ràng cho máy cục bộ — cùng cờ với pglite production
+  if (source.NODE_ENV === "production" && source.ALLOW_LOCAL_PGLITE !== "1") return "supabase";
+  return "local";
 }
 
 const localRoot = () => nodePath.resolve(process.env.LOCAL_STORAGE_DIR || nodePath.join(process.cwd(), ".local-storage"));
