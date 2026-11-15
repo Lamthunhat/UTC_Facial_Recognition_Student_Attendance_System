@@ -1,12 +1,12 @@
 "use client";
 
-import type { FaceLandmarker } from "@mediapipe/tasks-vision";
+import type { FaceDetector } from "@mediapipe/tasks-vision";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/input";
 import { poseSteps, type Challenge } from "@/lib/student/challenge";
-import { loadFaceLandmarker } from "@/lib/student/face-landmarker";
-import { createPoseTracker, yawFromLandmarks } from "@/lib/student/face-pose";
+import { detectPose, loadFaceDetector } from "@/lib/student/face-detector";
+import { createPoseTracker } from "@/lib/student/face-pose";
 import { FACE_FRAME } from "@/lib/student/image";
 import { captureVideo } from "@/lib/student/image-browser";
 import { cn } from "@/lib/utils";
@@ -15,7 +15,7 @@ import { useCamera } from "./use-camera";
 /**
  * T063 / FR-045a — Chụp 3 khung mặt trực tiếp bằng camera trước theo thử thách của server:
  * [quay hướng 1, nhìn thẳng, quay hướng 2].
- * - Có MediaPipe Face Landmarker (tự host): ước lượng yaw realtime (cùng quy ước server), hướng dẫn "Không thấy khuôn
+ * - Có MediaPipe Face Detector (BlazeFace, tự host): yaw realtime từ keypoint mắt/mũi (giống server), hướng dẫn "Không thấy khuôn
  *   mặt / Quay thêm sang trái|phải / Nhìn thẳng / Giữ yên", TỰ CHỤP khi đạt góc và ổn định ~300 ms; quá 10 s mỗi khung
  *   thì nhắc lại (và hiện nút chụp theo đếm ngược cho khung đó).
  * - Model không tải được → đếm ngược 3 giây mỗi khung như trước.
@@ -36,7 +36,7 @@ export function FaceChallenge({ challenge, onComplete }: { challenge: Challenge;
   const [error, setError] = useState<string | null>(null);
   const [model, setModel] = useState<"loading" | "ready" | "unavailable">("loading");
   const [canFallback, setCanFallback] = useState(false);
-  const landmarker = useRef<FaceLandmarker | null>(null);
+  const detector = useRef<FaceDetector | null>(null);
   const cancelled = useRef(false);
   const raf = useRef<number | null>(null);
   const fallbackNow = useRef(false);
@@ -45,10 +45,10 @@ export function FaceChallenge({ challenge, onComplete }: { challenge: Challenge;
     cancelled.current = false;
     void start();
     let alive = true;
-    void Promise.race([loadFaceLandmarker(), new Promise<null>((r) => setTimeout(() => r(null), MODEL_LOAD_TIMEOUT_MS))]).then((lm) => {
+    void Promise.race([loadFaceDetector(), new Promise<null>((r) => setTimeout(() => r(null), MODEL_LOAD_TIMEOUT_MS))]).then((d) => {
       if (!alive) return;
-      landmarker.current = lm;
-      setModel(lm ? "ready" : "unavailable");
+      detector.current = d;
+      setModel(d ? "ready" : "unavailable");
     });
     return () => {
       alive = false;
@@ -69,7 +69,7 @@ export function FaceChallenge({ challenge, onComplete }: { challenge: Challenge;
   }
 
   /** Tự chụp theo hướng dẫn; trả "countdown" nếu SV chọn chụp theo đếm ngược cho khung này. */
-  function guidedStep(video: HTMLVideoElement, lm: FaceLandmarker, i: number): Promise<Blob | "countdown" | null> {
+  function guidedStep(video: HTMLVideoElement, fd: FaceDetector, i: number): Promise<Blob | "countdown" | null> {
     const tracker = createPoseTracker(steps[i].pose, performance.now());
     fallbackNow.current = false;
     let last = 0;
@@ -81,15 +81,7 @@ export function FaceChallenge({ challenge, onComplete }: { challenge: Challenge;
         const now = performance.now();
         if (now - last >= DETECT_EVERY_MS && video.readyState >= 2) {
           last = now;
-          let faces = 0;
-          let yaw: number | null = null;
-          try {
-            const res = lm.detectForVideo(video, now);
-            faces = res.faceLandmarks.length;
-            yaw = faces === 1 ? yawFromLandmarks(res.faceLandmarks[0], video.videoWidth, video.videoHeight) : faces > 1 ? 0 : null;
-          } catch {
-            /* khung lỗi → coi như không thấy mặt */
-          }
+          const { faces, yaw } = detectPose(fd, video, now);
           const r = tracker.feed(now, faces, yaw);
           if (r.status === "capture") {
             captureVideo(video, FACE_FRAME).then(resolve, reject);
@@ -115,8 +107,8 @@ export function FaceChallenge({ challenge, onComplete }: { challenge: Challenge;
     const frames: Blob[] = [];
     try {
       for (let i = 0; i < steps.length; i++) {
-        const lm = landmarker.current;
-        let shot: Blob | "countdown" | null = lm ? await guidedStep(video, lm, i) : await countdownStep(video, i);
+        const fd = detector.current;
+        let shot: Blob | "countdown" | null = fd ? await guidedStep(video, fd, i) : await countdownStep(video, i);
         if (shot === "countdown") shot = await countdownStep(video, i);
         if (!shot || cancelled.current) return;
         frames.push(shot);

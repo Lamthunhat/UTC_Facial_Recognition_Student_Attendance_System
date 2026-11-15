@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import { mkdir, writeFile, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { inflateRawSync } from "node:zlib";
+import { FACE_DETECTOR_MODEL_SHA256, FACE_DETECTOR_MODEL_SOURCE, FACE_DETECTOR_MODEL_URL } from "../apps/web/src/lib/student/mediapipe-assets";
 
 const ZIP_URL = "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_s.zip";
 const ZIP_SHA256 = "d85a87f503f691807cd8bb97128bdf7a0660326cd9cd02657127fa978bab8b5e";
@@ -73,31 +74,28 @@ function extractEntries(zip: Buffer, names: string[]): Map<string, Buffer> {
 }
 
 /**
- * MediaPipe Face Landmarker (float16) cho hướng dẫn quay đầu ở TRÌNH DUYỆT (chỉ hướng dẫn — server vẫn quyết định).
- * Tự host trong apps/web/public/mediapipe/ (không CDN, đúng CSP connect-src 'self'). Giấy phép Apache-2.0.
+ * MediaPipe Face Detector (BlazeFace short-range, float16) cho hướng dẫn quay đầu ở TRÌNH DUYỆT (chỉ hướng dẫn — server
+ * vẫn quyết định). Tự host trong apps/web/public (không CDN, CSP connect-src 'self'); tên file có hash → cache immutable.
+ * Đường dẫn + sha256 dùng chung với client (apps/web/src/lib/student/mediapipe-assets.ts). Giấy phép Apache-2.0.
  */
-const FACE_LANDMARKER_URL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
-const FACE_LANDMARKER_SHA256 = "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff";
-const PUBLIC_MEDIAPIPE = path.resolve(__dirname, "../apps/web/public/mediapipe");
-
-async function downloadFaceLandmarker() {
-  const dest = path.join(PUBLIC_MEDIAPIPE, "face_landmarker.task");
-  const have = await readFile(dest).then(sha256, () => null);
-  if (have === FACE_LANDMARKER_SHA256) {
-    console.log("✔ face_landmarker.task đã có");
+async function downloadFaceDetector() {
+  const dest = path.resolve(__dirname, "../apps/web/public", FACE_DETECTOR_MODEL_URL.slice(1));
+  const name = path.basename(dest);
+  if ((await readFile(dest).then(sha256, () => null)) === FACE_DETECTOR_MODEL_SHA256) {
+    console.log(`✔ ${name} đã có`);
     return;
   }
-  const res = await fetch(FACE_LANDMARKER_URL);
-  if (!res.ok) throw new Error(`Tải face_landmarker.task thất bại: HTTP ${res.status}`);
+  const res = await fetch(FACE_DETECTOR_MODEL_SOURCE);
+  if (!res.ok) throw new Error(`Tải ${name} thất bại: HTTP ${res.status}`);
   const buf = Buffer.from(await res.arrayBuffer());
-  if (sha256(buf) !== FACE_LANDMARKER_SHA256) throw new Error("Mã băm face_landmarker.task không khớp — dừng lại");
-  await mkdir(PUBLIC_MEDIAPIPE, { recursive: true });
+  if (sha256(buf) !== FACE_DETECTOR_MODEL_SHA256) throw new Error(`Mã băm ${name} không khớp — dừng lại`);
+  await mkdir(path.dirname(dest), { recursive: true });
   await writeFile(dest, buf);
-  console.log(`✔ face_landmarker.task (${(buf.length / 1e6).toFixed(1)} MB)`);
+  console.log(`✔ ${name} (${(buf.length / 1e3).toFixed(0)} KB)`);
 }
 
 async function main() {
-  await downloadFaceLandmarker();
+  await downloadFaceDetector();
   if (await alreadyPresent()) {
     console.log(`✔ Model đã có trong ${OUT_DIR}`);
     return;

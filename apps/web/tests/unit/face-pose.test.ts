@@ -1,42 +1,43 @@
 import { describe, expect, it } from "vitest";
-import { CLIENT_POSE, createPoseTracker, poseGuidance, yawFromLandmarks, type Pt } from "@/lib/student/face-pose";
+import { classifyYaw, CLIENT_POSE, createPoseTracker, poseGuidance, SERVER_POSE, yawFromKeypoints, type Pt } from "@/lib/student/face-pose";
 
 /**
- * Hướng dẫn quay đầu ở trình duyệt (MediaPipe Face Landmarker) — CHỈ hướng dẫn, server vẫn quyết định.
- * Yaw cùng quy ước server (face/liveness.ts): ảnh KHÔNG lật, (mũi.x − trung điểm 2 mắt.x) / khoảng cách 2 mắt;
- * SV quay sang TRÁI của mình → mũi lệch phải ảnh → yaw > 0.
+ * Hướng dẫn quay đầu ở trình duyệt (MediaPipe Face Detector — BlazeFace short-range) — CHỈ hướng dẫn, server quyết định.
+ * Yaw tính như server làm với 5 điểm SCRFD (face/liveness.ts headYaw): ảnh KHÔNG lật,
+ * (mũi.x − trung điểm 2 mắt.x) / khoảng cách 2 mắt; SV quay sang TRÁI của mình → mũi lệch phải ảnh → yaw > 0.
+ * Keypoint BlazeFace (chuẩn hoá 0–1): [0] mắt phải, [1] mắt trái, [2] chóp mũi, [3] miệng, [4] tai phải, [5] tai trái.
  */
 const W = 1280;
 const H = 720;
-/** 478 điểm chuẩn hoá; mắt (tâm mống mắt 468, 473) cách nhau 0,1 chiều rộng; mũi (1) lệch theo yaw. */
 function face(yaw: number): Pt[] {
-  const pts: Pt[] = Array.from({ length: 478 }, () => ({ x: 0.5, y: 0.5 }));
-  pts[468] = { x: 0.45, y: 0.45 };
-  pts[473] = { x: 0.55, y: 0.45 };
-  pts[1] = { x: 0.5 + yaw * 0.1, y: 0.55 };
-  return pts;
+  return [
+    { x: 0.45, y: 0.45 }, // mắt
+    { x: 0.55, y: 0.45 }, // mắt
+    { x: 0.5 + yaw * 0.1, y: 0.55 }, // mũi
+    { x: 0.5, y: 0.65 },
+    { x: 0.38, y: 0.5 },
+    { x: 0.62, y: 0.5 },
+  ];
 }
 
-describe("yawFromLandmarks", () => {
+describe("yawFromKeypoints", () => {
   it("cùng quy ước server: mũi lệch phải ảnh → yaw dương (= quay TRÁI của SV)", () => {
-    expect(yawFromLandmarks(face(0.3), W, H)).toBeCloseTo(0.3, 6);
-    expect(yawFromLandmarks(face(-0.25), W, H)).toBeCloseTo(-0.25, 6);
-    expect(yawFromLandmarks(face(0), W, H)).toBeCloseTo(0, 6);
+    expect(yawFromKeypoints(face(0.3), W, H)).toBeCloseTo(0.3, 6);
+    expect(yawFromKeypoints(face(-0.25), W, H)).toBeCloseTo(-0.25, 6);
+    expect(yawFromKeypoints(face(0), W, H)).toBeCloseTo(0, 6);
   });
-  it("tính theo điểm ảnh (không méo khi khung không vuông)", () => {
-    const f = face(0.3);
-    // nâng mắt phải lên → khoảng cách mắt tính bằng px phải dùng cả W và H
-    f[473] = { x: 0.55, y: 0.45 + 0.1 * (W / H) * 0 };
-    expect(yawFromLandmarks(f, W, H)).toBeCloseTo(0.3, 6);
+  it("khoảng cách mắt tính bằng điểm ảnh (khung không vuông vẫn đúng)", () => {
+    const f = face(0);
+    f[1] = { x: 0.55, y: 0.45 + (0.1 * W) / H }; // mắt lệch dọc đúng bằng khoảng cách ngang (theo px)
+    f[2] = { x: 0.5 + 0.2 * 0.1 * Math.SQRT2, y: 0.55 };
+    expect(yawFromKeypoints(f, W, H)).toBeCloseTo(0.2, 6);
   });
-  it("thiếu điểm mống mắt → dùng khoé mắt (33/133, 362/263); không đủ điểm → null", () => {
-    const f = face(0.3).slice(0, 468); // không có iris
-    f[33] = { x: 0.43, y: 0.45 };
-    f[133] = { x: 0.47, y: 0.45 };
-    f[362] = { x: 0.53, y: 0.45 };
-    f[263] = { x: 0.57, y: 0.45 };
-    expect(yawFromLandmarks(f, W, H)).toBeCloseTo(0.3, 6);
-    expect(yawFromLandmarks([], W, H)).toBeNull();
+  it("thiếu keypoint / hai mắt trùng nhau → null", () => {
+    expect(yawFromKeypoints([], W, H)).toBeNull();
+    expect(yawFromKeypoints(face(0.1).slice(0, 2), W, H)).toBeNull();
+    const f = face(0.1);
+    f[1] = f[0];
+    expect(yawFromKeypoints(f, W, H)).toBeNull();
   });
 });
 
@@ -85,5 +86,20 @@ describe("createPoseTracker — tự chụp khi đạt góc và ổn định ~30
     expect(t.feed(10_100, 1, 0).status).toBe("adjust"); // khung mới bắt đầu lại
     expect(t.feed(19_999, 1, 0).status).toBe("adjust");
     expect(t.feed(20_000, 1, 0).status).toBe("timeout");
+  });
+});
+
+describe("classifyYaw — phân loại theo bộ ngưỡng (trang chẩn đoán hiệu chỉnh bằng mặt thật)", () => {
+  it("SERVER_POSE khớp đúng LIVENESS_RULES của server", async () => {
+    const { LIVENESS_RULES } = await import("@utc/backend/face/liveness");
+    expect(SERVER_POSE).toEqual({ centerMaxYaw: LIVENESS_RULES.centerMaxYaw, turnMinYaw: LIVENESS_RULES.turnMinYaw });
+  });
+  it("cùng ngữ nghĩa classifyPose của server: thẳng / trái / phải / không rõ", () => {
+    expect(classifyYaw(0.1, SERVER_POSE)).toBe("center");
+    expect(classifyYaw(0.2, SERVER_POSE)).toBe("left");
+    expect(classifyYaw(-0.25, SERVER_POSE)).toBe("right");
+    expect(classifyYaw(0.15, SERVER_POSE)).toBe("unclear");
+    expect(classifyYaw(null, SERVER_POSE)).toBe("unclear");
+    expect(classifyYaw(0.2, CLIENT_POSE)).toBe("unclear"); // client chặt hơn
   });
 });

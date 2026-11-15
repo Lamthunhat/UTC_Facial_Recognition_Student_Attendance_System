@@ -28,9 +28,12 @@ export const CARD_ASSETS = [
 ];
 
 /**
- * Wasm MediaPipe tasks-vision 1.2.0 cho trình duyệt (hướng dẫn quay đầu) — tự host trong public/mediapipe/wasm
- * (không CDN). Trình duyệt chỉ tải 1 cặp: bản SIMD hoặc bản nosimd tuỳ máy.
+ * Wasm MediaPipe tasks-vision 1.2.0 cho trình duyệt (hướng dẫn quay đầu) — tự host trong
+ * public/mediapipe/tasks-vision-1.2.0/ (thư mục có PHIÊN BẢN → cache immutable; phải khớp MEDIAPIPE_WASM_BASE trong
+ * apps/web/src/lib/student/mediapipe-assets.ts — có test). Trình duyệt chỉ tải 1 cặp: SIMD hoặc nosimd tuỳ máy.
  */
+export const TASKS_VISION_VERSION = "1.2.0";
+export const PUBLIC_ASSETS_DIR = (appDir) => path.join(appDir, "public", "mediapipe", `tasks-vision-${TASKS_VISION_VERSION}`);
 const mp = (file) => (req) => path.join(path.dirname(req.resolve("@mediapipe/tasks-vision")), "wasm", file);
 export const PUBLIC_ASSETS = [
   { name: "vision_wasm_internal.js", source: mp("vision_wasm_internal.js"), sha256: "85c1a342be70427987f900969a5f26e17557351111364e6585e97fb03e93e108" },
@@ -68,8 +71,8 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   prepareCardAssets({ appDir })
     .then(async (r) => {
       console.log(`card-assets: ${r.map((x) => x.name).join(", ")} (sha256 đã kiểm)`);
-      const p = await prepareCardAssets({ appDir, outDir: path.join(appDir, "public/mediapipe/wasm"), assets: PUBLIC_ASSETS });
-      console.log(`public/mediapipe/wasm: ${p.length} file (sha256 đã kiểm)`);
+      const p = await prepareCardAssets({ appDir, outDir: PUBLIC_ASSETS_DIR(appDir), assets: PUBLIC_ASSETS });
+      console.log(`${path.relative(appDir, PUBLIC_ASSETS_DIR(appDir))}: ${p.length} file (sha256 đã kiểm)`);
     })
     .catch((e) => {
       console.error(String(e?.message ?? e));

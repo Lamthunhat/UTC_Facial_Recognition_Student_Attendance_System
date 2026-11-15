@@ -1,40 +1,38 @@
 /**
- * Hướng dẫn quay đầu ở trình duyệt từ điểm mốc MediaPipe Face Landmarker — CHỈ để hướng dẫn và tự chụp; server vẫn
- * quyết định liveness (face/liveness.ts). Thuần, test được.
- * Yaw cùng quy ước server: trên ảnh KHÔNG lật (khung video gốc), yaw = (mũi.x − trung điểm hai mắt.x) / khoảng cách hai
- * mắt (điểm ảnh). SV quay sang TRÁI của mình → mũi lệch phải ảnh → yaw > 0.
- * Ngưỡng client CHẶT HƠN server (nhìn thẳng ≤ 0,08 so với 0,12; quay ≥ 0,28 so với 0,2) để có biên an toàn — hai mô
- * hình (MediaPipe ở client, SCRFD ở server) ước lượng điểm mốc hơi khác nhau.
+ * Hướng dẫn quay đầu ở trình duyệt từ keypoint MediaPipe Face Detector (BlazeFace short-range) — CHỈ để hướng dẫn và
+ * tự chụp; server vẫn quyết định liveness (face/liveness.ts). Thuần, test được.
+ * Yaw tính GIỐNG server với 5 điểm SCRFD (headYaw): trên ảnh KHÔNG lật (khung video gốc),
+ * yaw = (mũi.x − trung điểm hai mắt.x) / khoảng cách hai mắt (điểm ảnh). SV quay sang TRÁI của mình → yaw > 0.
+ * Ngưỡng client CHẶT HƠN server (nhìn thẳng ≤ 0,08 so với 0,12; quay ≥ 0,28 so với 0,2) để có biên an toàn — BlazeFace
+ * (client) và SCRFD (server) đặt keypoint hơi khác nhau. Hiệu chỉnh bằng mặt thật ở /sv/the-sinh-vien/debug.
  */
 export type Pt = { x: number; y: number };
 export type Pose = "left" | "right" | "center";
 
 export const CLIENT_POSE = { centerMaxYaw: 0.08, turnMinYaw: 0.28, holdMs: 300, stepTimeoutMs: 10_000 } as const;
+/** Ngưỡng của SERVER (face/liveness.ts LIVENESS_RULES — có test đối chiếu); chỉ để hiển thị khi hiệu chỉnh. */
+export const SERVER_POSE = { centerMaxYaw: 0.12, turnMinYaw: 0.2 } as const;
 
-// Chỉ số điểm mốc Face Landmarker (478 điểm): mũi, tâm mống mắt, khoé mắt
-const NOSE_TIP = 1;
-const IRIS = [468, 473] as const;
-const EYE_CORNERS = [
-  [33, 133],
-  [362, 263],
-] as const;
+/** Phân loại yaw theo một bộ ngưỡng — cùng ngữ nghĩa classifyPose của server. */
+export function classifyYaw(yaw: number | null, t: { centerMaxYaw: number; turnMinYaw: number }): Pose | "unclear" {
+  if (yaw === null || !Number.isFinite(yaw)) return "unclear";
+  if (Math.abs(yaw) <= t.centerMaxYaw) return "center";
+  if (yaw >= t.turnMinYaw) return "left";
+  if (yaw <= -t.turnMinYaw) return "right";
+  return "unclear";
+}
 
-const avg = (a: Pt, b: Pt): Pt => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+/** Keypoint BlazeFace (chuẩn hoá 0–1): [0] mắt phải, [1] mắt trái, [2] chóp mũi, [3] miệng, [4] tai phải, [5] tai trái. */
+const EYE_A = 0;
+const EYE_B = 1;
+const NOSE = 2;
 
-/** Yaw từ điểm mốc chuẩn hoá (0–1) của khung rộng w × cao h; thiếu điểm → null. */
-export function yawFromLandmarks(lm: Pt[], w: number, h: number): number | null {
-  const nose = lm[NOSE_TIP];
-  if (!nose) return null;
-  let e1: Pt | undefined;
-  let e2: Pt | undefined;
-  if (lm[IRIS[0]] && lm[IRIS[1]]) {
-    e1 = lm[IRIS[0]];
-    e2 = lm[IRIS[1]];
-  } else if (EYE_CORNERS.flat().every((i) => lm[i])) {
-    e1 = avg(lm[EYE_CORNERS[0][0]], lm[EYE_CORNERS[0][1]]);
-    e2 = avg(lm[EYE_CORNERS[1][0]], lm[EYE_CORNERS[1][1]]);
-  }
-  if (!e1 || !e2) return null;
+/** Yaw từ keypoint chuẩn hoá của khung rộng w × cao h; thiếu điểm / hai mắt trùng → null. */
+export function yawFromKeypoints(kps: Pt[], w: number, h: number): number | null {
+  const e1 = kps[EYE_A];
+  const e2 = kps[EYE_B];
+  const nose = kps[NOSE];
+  if (!e1 || !e2 || !nose) return null;
   const dist = Math.hypot((e2.x - e1.x) * w, (e2.y - e1.y) * h);
   if (!(dist > 0)) return null;
   return ((nose.x - (e1.x + e2.x) / 2) * w) / dist;

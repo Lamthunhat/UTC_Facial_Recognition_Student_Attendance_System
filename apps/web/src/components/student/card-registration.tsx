@@ -1,9 +1,8 @@
 "use client";
 
 import { CheckCircle2, Clock } from "lucide-react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { AppLink, useAppNavigate } from "@/components/app-link";
 import { CardCapture } from "@/components/camera/CardCapture";
 import { FaceChallenge } from "@/components/camera/FaceChallenge";
 import { SubmitProgress } from "@/components/student/submit-progress";
@@ -13,7 +12,7 @@ import { api, ApiError } from "@/lib/api";
 import { cardErrorAdvice, type CardAdvice } from "@/lib/student/card-errors";
 import { cardFlow, initialCardFlow, type Notice } from "@/lib/student/card-flow";
 import { isChallenge } from "@/lib/student/challenge";
-import { loadFaceLandmarker } from "@/lib/student/face-landmarker";
+import { loadFaceDetector } from "@/lib/student/face-detector";
 import { requestFits } from "@/lib/student/image";
 
 /**
@@ -65,7 +64,7 @@ function Stepper({ current }: { current: 1 | 2 | 3 }) {
 }
 
 export function CardRegistration({ onFinished }: { onFinished: () => void }) {
-  const router = useRouter();
+  const navigate = useAppNavigate();
   const [s, dispatch] = useReducer(cardFlow, initialCardFlow);
   const [nonceError, setNonceError] = useState<CardAdvice | null>(null);
   const [loadingNonce, setLoadingNonce] = useState(false);
@@ -76,12 +75,12 @@ export function CardRegistration({ onFinished }: { onFinished: () => void }) {
 
   // Tải sẵn bộ hướng dẫn khuôn mặt (MediaPipe) khi SV đang đọc màn giới thiệu — lỗi thì FaceChallenge tự dùng đếm ngược
   useEffect(() => {
-    if (s.step === "face-intro") void loadFaceLandmarker();
+    if (s.step === "face-intro") void loadFaceDetector();
   }, [s.step]);
 
   function follow(advice: CardAdvice) {
-    if (advice.action === "consent") router.push(`/sv/dong-y?next=${encodeURIComponent(HERE)}`);
-    else if (advice.action === "login") router.push(`/sv?next=${encodeURIComponent(HERE)}`);
+    if (advice.action === "consent") navigate(`/sv/dong-y?next=${encodeURIComponent(HERE)}`);
+    else if (advice.action === "login") navigate(`/sv?next=${encodeURIComponent(HERE)}`);
     else if (advice.action === "refresh") onFinished();
   }
 
@@ -209,27 +208,27 @@ export function CardRegistration({ onFinished }: { onFinished: () => void }) {
           <CheckCircle2 className="size-10 text-green-700" aria-hidden />
           <p className="font-semibold text-green-800">Đăng ký thẻ thành công</p>
           <p className="text-sm text-green-800">Bạn đã có thể điểm danh ở các lớp của mình.</p>
-          <Link href="/sv/lop" className="text-sm font-semibold text-primary hover:underline">
+          <AppLink href="/sv/lop" className="text-sm font-semibold text-primary hover:underline">
             Về danh sách lớp
-          </Link>
+          </AppLink>
         </div>
       ) : (
         <div className="flex flex-col items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 p-6 text-center" role="status">
           <Clock className="size-10 text-amber-700" aria-hidden />
           <p className="font-semibold text-amber-900">Đang chờ giảng viên duyệt</p>
           <p className="text-sm text-amber-900">Ảnh thẻ đã được gửi. Bạn sẽ điểm danh được khi giảng viên duyệt.</p>
-          <Link href="/sv/lop" className="text-sm font-semibold text-primary hover:underline">
+          <AppLink href="/sv/lop" className="text-sm font-semibold text-primary hover:underline">
             Về danh sách lớp
-          </Link>
+          </AppLink>
         </div>
       );
     case "blocked":
       return (
         <div className="flex flex-col gap-4">
           <NoticeBox notice={s.notice} />
-          <Link href="/sv/lop" className="text-center text-sm font-semibold text-primary hover:underline">
+          <AppLink href="/sv/lop" className="text-center text-sm font-semibold text-primary hover:underline">
             Về danh sách lớp
-          </Link>
+          </AppLink>
         </div>
       );
   }
