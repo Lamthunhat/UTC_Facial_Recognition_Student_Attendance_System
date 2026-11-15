@@ -24,7 +24,7 @@ Cách tiếp cận kỹ thuật: mọi quyết định ở server (Nguyên tắc
 
 **Project Type**: Web application — monorepo một app Next.js full-stack
 
-**Performance Goals**: 100 lượt điểm danh đồng thời, p95 ≤ 5 s/lượt (SC-002); bảng điểm danh cập nhật ≤ 5 s (SC-007); lọc/tìm ≤ 1 s cho 100 SV × 30 buổi (SC-009); trợ lý AI ≤ 5 s p95 (SC-011)
+**Performance Goals**: 100 lượt điểm danh đồng thời, p95 ≤ 5 s/lượt (SC-002); đăng ký thẻ p95 ≤ 10 s (một lần, có màn tiến trình — T012); bảng điểm danh cập nhật ≤ 5 s (SC-007); lọc/tìm ≤ 1 s cho 100 SV × 30 buổi (SC-009); trợ lý AI ≤ 5 s p95 (SC-011)
 
 **Constraints**: Bundle mỗi function ≤ 250 MB không nén; RAM 2 GB/1 vCPU (Hobby); ảnh gửi lên ≤ 3 × 300 KB (client nén JPEG 720p); không lưu ảnh tham chiếu ngoài ảnh thẻ; ảnh/vector lượt điểm danh xoá sau 7 ngày; thời gian theo server; giao diện tiếng Việt
 
