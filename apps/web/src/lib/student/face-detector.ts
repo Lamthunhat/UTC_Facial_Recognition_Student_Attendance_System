@@ -49,7 +49,9 @@ export function detectPose(detector: FaceDetector, video: HTMLVideoElement, now:
     const { detections } = detector.detectForVideo(video, now);
     const faces = detections.length;
     if (faces !== 1) return { faces, yaw: faces > 1 ? 0 : null };
-    return { faces, yaw: yawFromKeypoints(detections[0].keypoints ?? [], video.videoWidth, video.videoHeight) };
+    const d = detections[0];
+    // bbox của BlazeFace tính bằng điểm ảnh; keypoint chuẩn hoá 0–1
+    return { faces, yaw: yawFromKeypoints(d.keypoints ?? [], d.boundingBox?.width ?? 0, video.videoWidth, video.videoHeight) };
   } catch {
     return { faces: 0, yaw: null };
   }

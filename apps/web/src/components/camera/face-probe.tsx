@@ -5,7 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/input";
 import { detectPose, faceDetectorInitMs, loadFaceDetector } from "@/lib/student/face-detector";
-import { classifyYaw, CLIENT_POSE, SERVER_POSE } from "@/lib/student/face-pose";
+import { CLIENT_YAW, SERVER_YAW, YAW_SCALE, type YawThresholds } from "@utc/shared/face-yaw";
+import { classifyYaw } from "@/lib/student/face-pose";
 import { useCamera } from "./use-camera";
 
 /**
@@ -13,7 +14,8 @@ import { useCamera } from "./use-camera";
  * loại theo ngưỡng client và ngưỡng server, min/max yaw đã thấy, thời gian tải/khởi tạo + dung lượng tải. Dùng để hiệu
  * chỉnh ngưỡng bằng mặt thật. Không chụp, không gửi, không lưu ảnh nào.
  */
-const POSE_VI = { left: "trái", right: "phải", center: "thẳng", unclear: "chưa rõ" } as const;
+const POSE_VI = { left: "trái", right: "phải", center: "thẳng", too_far: "QUÁ MẠNH", unclear: "chưa rõ" } as const;
+const fmt = (t: YawThresholds) => `thẳng ≤ ${t.centerMax} · quay ${t.turnMin}–${t.turnMax} · > ${t.turnMax} quá mạnh`;
 
 export function FaceProbe() {
   const { videoRef, state, start, stop } = useCamera("user", { width: 1280, height: 720 });
@@ -88,8 +90,8 @@ export function FaceProbe() {
     ? [
         ["Số mặt", String(live.faces)],
         ["Yaw (client)", yaw === null ? "—" : yaw.toFixed(3)],
-        ["Theo ngưỡng client", `${POSE_VI[classifyYaw(yaw, CLIENT_POSE)]} (thẳng ≤ ${CLIENT_POSE.centerMaxYaw}, quay ≥ ${CLIENT_POSE.turnMinYaw})`],
-        ["Theo ngưỡng server", `${POSE_VI[classifyYaw(yaw, SERVER_POSE)]} (thẳng ≤ ${SERVER_POSE.centerMaxYaw}, quay ≥ ${SERVER_POSE.turnMinYaw})`],
+        ["Theo ngưỡng client", `${POSE_VI[classifyYaw(yaw, CLIENT_YAW)]} (${fmt(CLIENT_YAW)})`],
+        ["Theo ngưỡng server", `${POSE_VI[classifyYaw(yaw, SERVER_YAW)]} (${fmt(SERVER_YAW)})`],
         ["Yaw nhỏ nhất / lớn nhất", range ? `${range.min.toFixed(3)} / ${range.max.toFixed(3)}` : "—"],
         ["Tốc độ nhận diện", `${live.fps} khung/giây`],
       ]
@@ -101,7 +103,8 @@ export function FaceProbe() {
         Bộ hướng dẫn khuôn mặt (camera trước)
       </h2>
       <p className="text-xs text-muted-foreground">
-        Quay sang TRÁI của bạn → yaw dương; sang phải → âm. Không chụp, không gửi ảnh.
+        Thang yaw [-1, 1] = {YAW_SCALE} × (mũi − tâm 2 mắt) / bề rộng khung mặt (≈ sin góc quay). Quay sang TRÁI của bạn → dương;
+        sang phải → âm. Không chụp, không gửi ảnh.
       </p>
       {phase !== "idle" && (
         <div className="relative aspect-[3/4] w-full overflow-hidden rounded-lg bg-black sm:aspect-video">
