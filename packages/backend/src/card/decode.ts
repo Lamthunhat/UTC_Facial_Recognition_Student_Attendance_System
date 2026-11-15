@@ -2,29 +2,31 @@ import "server-only";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
-import { createWorker, type Worker } from "tesseract.js";
+import type { Worker } from "tesseract.js";
 import { prepareZXingModule, readBarcodes } from "zxing-wasm/reader";
+import { HttpError } from "../http/errors";
+import { log } from "../log";
+import { cardAssetPath } from "./assets";
 import { extractStudentCode, ocrNameLine, pickBarcodeCode, type DecodedCode } from "./verify";
 
 /**
  * T057 — Đọc thẻ sinh viên ở server (Principle I, research R3), chạy hoàn toàn cục bộ:
- * - Mã vạch: zxing-wasm, file .wasm nạp từ node_modules (không tải từ CDN).
- * - OCR: tesseract.js + dữ liệu tiếng Việt @tesseract.js-data/vie (đọc được cả chữ số) — dùng để
- *   đọc mã khi mã vạch hỏng và để so họ tên trên thẻ. Không ghi cache ra đĩa (filesystem serverless chỉ đọc).
+ * - Mã vạch: zxing-wasm, file .wasm đọc từ card-assets/ (không tải từ CDN).
+ * - OCR: tesseract.js + dữ liệu tiếng Việt (card-assets/vie.traineddata.gz, bản 4.0.0_best_int) — đọc mã khi mã vạch
+ *   hỏng và so họ tên trên thẻ. Không ghi cache ra đĩa (filesystem serverless chỉ đọc).
+ * Dữ liệu chạy nằm ở thư mục cố định card-assets/ (chép + kiểm sha256 khi build, xem ./assets.ts) — KHÔNG
+ * require.resolve gói nào lúc chạy (function Vercel không có package.json của gói không được import).
+ * tesseract.js chỉ được import khi thật sự cần OCR; lỗi nạp OCR không làm hỏng route khi mã vạch đã đọc được.
  * Worker OCR được giữ lại giữa các request trong cùng instance (khởi tạo ~0,3–0,5 s).
  */
-// createRequire theo thư mục chạy (không dùng import.meta.url): webpack của Next chỉ phân tích dạng import.meta.url
-// và sẽ cố bundle file .wasm/.gz — khi đó require.resolve trả mã module thay vì đường dẫn file. Thư mục chạy
-// (apps/web khi chạy Next, packages/backend khi test) đều khai báo zxing-wasm, tesseract.js, @tesseract.js-data/vie.
-// Lấy createRequire qua process.getBuiltinModule (Node ≥ 22.3) để webpack không phân tích/cảnh báo lời gọi.
-const nodeModule = (process as unknown as { getBuiltinModule(id: "node:module"): typeof import("node:module") }).getBuiltinModule("node:module");
-const require = nodeModule.createRequire(path.join(process.cwd(), "package.json"));
-
 let zxingReady: Promise<unknown> | undefined;
 function ensureZxing() {
-  zxingReady ??= readFile(require.resolve("zxing-wasm/reader/zxing_reader.wasm")).then((wasm) =>
-    prepareZXingModule({ overrides: { wasmBinary: wasm.buffer as ArrayBuffer }, fireImmediately: true }),
-  );
+  zxingReady ??= readFile(cardAssetPath("zxing_reader.wasm"))
+    .then((wasm) => prepareZXingModule({ overrides: { wasmBinary: wasm.buffer as ArrayBuffer }, fireImmediately: true }))
+    .catch((e) => {
+      zxingReady = undefined; // lần sau thử lại
+      throw e;
+    });
   return zxingReady;
 }
 
@@ -61,13 +63,27 @@ export async function readBarcodeTexts(img: Buffer): Promise<string[]> {
   return [...found];
 }
 
+/** Nạp tesseract.js lười (chỉ khi cần OCR). Thay được trong test để giả lập lỗi nạp. */
+type TesseractModule = Pick<typeof import("tesseract.js"), "createWorker">;
+const defaultOcrLoader = (): Promise<TesseractModule> => import("tesseract.js");
+let ocrLoader = defaultOcrLoader;
+export function setOcrLoaderForTest(loader: () => Promise<TesseractModule>) {
+  ocrLoader = loader;
+}
+export function resetOcrLoaderForTest() {
+  ocrLoader = defaultOcrLoader;
+}
+
 let worker: Promise<Worker> | undefined;
 function ocrWorker() {
-  worker ??= createWorker("vie", 1, {
-    langPath: path.join(path.dirname(require.resolve("@tesseract.js-data/vie/package.json")), "4.0.0_best_int"),
-    gzip: true,
-    cacheMethod: "none",
-  }).catch((e) => {
+  worker ??= (async () => {
+    const { createWorker } = await ocrLoader();
+    return createWorker("vie", 1, {
+      langPath: path.dirname(cardAssetPath("vie.traineddata.gz")),
+      gzip: true,
+      cacheMethod: "none",
+    });
+  })().catch((e) => {
     worker = undefined; // lần sau thử khởi tạo lại
     throw e;
   });
@@ -112,6 +128,8 @@ export async function ocrRotateRetry(img: Buffer, first: string): Promise<{ text
 export interface DecodeStats {
   barcodeMs: number;
   ocrMs: number;
+  /** OCR không chạy được (nạp tesseract / dữ liệu lỗi) — họ tên chưa được kiểm. */
+  ocrFailed?: boolean;
   /** Số lần OCR lại với ảnh xoay (chỉ khi KHÔNG đọc được mã vạch). */
   ocrRotations: number;
 }
@@ -132,12 +150,23 @@ export async function decodeCard(img: Buffer): Promise<{ decoded: DecodedCode | 
   const t0 = performance.now();
   let barcodeMs = 0;
   let ocrMs = 0;
+  let ocrError: unknown = null;
   const [barcodes, first] = await Promise.all([
     readBarcodeTexts(img).finally(() => (barcodeMs = Math.round(performance.now() - t0))),
-    ocrText(img).finally(() => (ocrMs = Math.round(performance.now() - t0))),
+    ocrText(img)
+      .catch((e) => {
+        ocrError = e;
+        return "";
+      })
+      .finally(() => (ocrMs = Math.round(performance.now() - t0))),
   ]);
+  if (ocrError) log.error("card_ocr_unavailable", { err: String(ocrError).slice(0, 300) });
   const fromBarcode = pickBarcodeCode(barcodes);
-  if (fromBarcode) return { decoded: { code: fromBarcode, method: "barcode" }, text: first, stats: { barcodeMs, ocrMs, ocrRotations: 0 } };
+  if (fromBarcode) {
+    return { decoded: { code: fromBarcode, method: "barcode" }, text: first, stats: { barcodeMs, ocrMs, ocrRotations: 0, ocrFailed: !!ocrError } };
+  }
+  // Không có mã vạch mà OCR cũng không chạy được → lỗi máy chủ (không phải ảnh của SV hỏng)
+  if (ocrError) throw new HttpError(503, "OCR_UNAVAILABLE", "Tạm thời không đọc được thẻ. Vui lòng thử lại sau ít phút.");
   const t1 = performance.now();
   const { text, rotations } = await ocrRotateRetry(img, first);
   ocrMs += Math.round(performance.now() - t1);

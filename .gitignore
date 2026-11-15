@@ -51,3 +51,5 @@ playwright-report/
 # Cấu hình Claude Code riêng từng máy (skills dùng chung vẫn được commit)
 .claude/settings.local.json
 .local-storage/
+# Dữ liệu đọc thẻ chép lúc build (scripts/card-assets.mjs)
+card-assets/

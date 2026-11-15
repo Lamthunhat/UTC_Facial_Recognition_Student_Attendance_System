@@ -76,6 +76,8 @@ export async function getStudentCard(studentId: string) {
     decodeMethod: c.decodeMethod,
     reviewReasons: c.reviewReasons,
     nameMatched: c.nameMatched,
+    /** Không có chữ OCR (OCR lỗi / không đọc được) → họ tên CHƯA được kiểm; giảng viên tự đối chiếu ảnh thẻ. */
+    nameUnverified: c.nameMatched === null,
     /** Họ tên trong danh sách lớp + dòng họ tên OCR (chỉ có khi NAME_MISMATCH) để đối chiếu. */
     rosterName: me ? `${me.lastName} ${me.firstName}` : null,
     ocrName: c.ocrName,

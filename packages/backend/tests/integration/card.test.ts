@@ -526,12 +526,14 @@ describe("giảng viên/admin: xem, duyệt, đặt lại thẻ (FR-049, T061)",
     });
     expect(card.duplicateOf.similarity).toBeGreaterThanOrEqual(0.6);
     expect(card).toMatchObject({ rosterName: "Hoàng Thị Giang", ocrName: null, liveSimilarity: expect.any(Number) });
+    // không có chữ OCR (OCR lỗi / không đọc được) → họ tên CHƯA được kiểm: cờ cho giảng viên
+    expect(card.nameUnverified).toBe(true);
     expect(JSON.stringify(card)).not.toMatch(/embedding/);
   });
 
   it("thẻ NAME_MISMATCH: giảng viên thấy dòng họ tên OCR cạnh họ tên trong danh sách", async () => {
     const { card } = await readJson(await staffReq("gv1", "H", ""));
-    expect(card).toMatchObject({ reviewReasons: ["NAME_MISMATCH"], ocrName: "NGUYỄN VĂN TÈO", rosterName: "Bùi Thanh Hương" });
+    expect(card).toMatchObject({ reviewReasons: ["NAME_MISMATCH"], ocrName: "NGUYỄN VĂN TÈO", rosterName: "Bùi Thanh Hương", nameUnverified: false });
   });
 
   it("giảng viên không dạy SV đó → 404 cho xem / duyệt / đặt lại (chống IDOR)", async () => {

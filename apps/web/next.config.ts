@@ -12,16 +12,21 @@ import type { NextConfig } from "next";
 const requireFromApp = createRequire(path.join(__dirname, "package.json"));
 function cardRuntimeFiles(): string[] {
   const real = (p: string) => realpathSync(p);
-  const zxingWasm = real(requireFromApp.resolve("zxing-wasm/reader/zxing_reader.wasm"));
-  const vieData = path.join(path.dirname(real(requireFromApp.resolve("@tesseract.js-data/vie/package.json"))), "4.0.0_best_int", "vie.traineddata.gz");
+  // Dữ liệu OCR vie + wasm zxing: chép vào card-assets/ lúc build (scripts/card-assets.mjs, kiểm sha256);
+  // code chạy đọc theo <cwd>/card-assets — không phân giải package.json lúc chạy.
+  const assets = ["vie.traineddata.gz", "zxing_reader.wasm"].map((f) => path.join(__dirname, "card-assets", f));
   // tesseract.js-core là phụ thuộc của tesseract.js → phân giải từ thư mục thật của tesseract.js
   const requireFromTesseract = createRequire(real(requireFromApp.resolve("tesseract.js/package.json")));
   const coreDir = path.dirname(real(requireFromTesseract.resolve("tesseract.js-core/package.json")));
-  // OEM 1 (LSTM) → chỉ các bản *-lstm.wasm (thường / simd / relaxedsimd tuỳ CPU)
-  const coreWasm = readdirSync(coreDir).filter((f) => f.endsWith("-lstm.wasm")).map((f) => path.join(coreDir, f));
-  const files = [zxingWasm, vieData, ...coreWasm];
+  // MỌI biến thể tesseract-core*.wasm: tesseract.js 7 bản Node gọi getCore(lstmOnly) với boolean ở chỗ tham số `oem`
+  // nên LUÔN nạp bản core KHÔNG-lstm (tesseract-core[-simd|-relaxedsimd].wasm, tuỳ CPU) dù createWorker(…, OEM 1).
+  // Chỉ include *-lstm.wasm (như trước) → OCR hỏng trên Vercel — check:traces bước "chạy thử" bắt được lỗi này.
+  const coreWasm = readdirSync(coreDir).filter((f) => /^tesseract-core.*\.wasm$/.test(f)).map((f) => path.join(coreDir, f));
+  const files = [...assets, ...coreWasm];
   const missing = files.filter((f) => !existsSync(f));
-  if (missing.length || coreWasm.length === 0) throw new Error(`Thiếu file chạy đọc thẻ: ${missing.join(", ") || "tesseract-core *-lstm.wasm"}`);
+  if (missing.length || coreWasm.length === 0) {
+    throw new Error(`Thiếu file chạy đọc thẻ: ${missing.join(", ") || "tesseract-core*.wasm"} — chạy node scripts/card-assets.mjs`);
+  }
   // Glob của Next tính tương đối từ thư mục app, dùng dấu "/"
   return files.map((f) => path.relative(__dirname, f).split(path.sep).join("/"));
 }
@@ -58,7 +63,7 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: path.join(__dirname, "../.."),
   outputFileTracingIncludes: {
     "/api/**": ["./models/*.onnx", "./public/fonts/*.ttf"],
-    // Đọc thẻ (T057): wasm zxing + wasm tesseract-core + dữ liệu OCR tiếng Việt (bản 4.0.0_best_int).
+    // Đọc thẻ (T057): card-assets/ (dữ liệu OCR vie bản 4.0.0_best_int + wasm zxing) + wasm tesseract-core.
     // Worker + core *.js được trace tự động. Khoá so với tên route nội bộ "/app/api/student/card" (picomatch, contains).
     // Kiểm sau khi build: scripts/check-traces.mjs.
     "/api/student/card": cardRuntimeFiles(),

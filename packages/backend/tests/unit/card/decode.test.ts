@@ -1,9 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import sharp, { type OverlayOptions } from "sharp";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { prepareZXingModule, writeBarcode } from "zxing-wasm/writer";
-import { closeOcr, decodeCard, ocrText, readBarcodeTexts } from "../../../src/card/decode";
+import { closeOcr, decodeCard, ocrText, readBarcodeTexts, resetOcrLoaderForTest, setOcrLoaderForTest } from "../../../src/card/decode";
 import { nameAppearsIn } from "../../../src/card/verify";
 
 /**
@@ -113,6 +113,31 @@ describe("decode thẻ (chạy thật, cục bộ)", () => {
     expect(r.stats.barcodeMs).toBeGreaterThanOrEqual(0);
     expect(r.stats.ocrMs).toBeGreaterThanOrEqual(0);
   }, 120_000);
+
+  describe("tesseract nạp lười — lỗi nạp OCR không làm hỏng cả route", () => {
+    afterEach(async () => {
+      await closeOcr();
+      resetOcrLoaderForTest();
+    });
+
+    it("OCR không nạp được + mã vạch đọc được → vẫn trả mã (method=barcode), text rỗng, cờ ocrFailed", async () => {
+      await closeOcr();
+      setOcrLoaderForTest(() => Promise.reject(new Error("Cannot find module '@tesseract.js-data/vie/package.json'")));
+      const r = await decodeCard(await portraitCard({ code: "231230816", name: "VŨ MINH QUÂN", barcode: "horizontal" }));
+      expect(r.decoded).toEqual({ code: "231230816", method: "barcode" });
+      expect(r.text).toBe("");
+      expect(r.stats.ocrFailed).toBe(true);
+    }, 60_000);
+
+    it("OCR không nạp được + KHÔNG có mã vạch → 503 OCR_UNAVAILABLE (lỗi máy chủ, không phải lỗi của SV)", async () => {
+      await closeOcr();
+      setOcrLoaderForTest(() => Promise.reject(new Error("boom")));
+      await expect(decodeCard(await portraitCard({ code: "231230817", name: "TRỊNH VĂN SƠN", barcode: "blurred" }))).rejects.toMatchObject({
+        status: 503,
+        code: "OCR_UNAVAILABLE",
+      });
+    }, 60_000);
+  });
 
   it("ảnh không có chữ hay mã vạch → decoded null", async () => {
     const blank = await sharp({ create: { width: 800, height: 500, channels: 3, background: "#888" } }).jpeg().toBuffer();
