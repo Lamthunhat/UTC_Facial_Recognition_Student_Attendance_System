@@ -2,11 +2,13 @@
 
 import { LogOut } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useAppNavigate } from "./app-link";
 import { api } from "@/lib/api";
 import { Button } from "./ui/button";
 
 export function LogoutButton({ to = "/" }: { to?: string }) {
   const router = useRouter();
+  const navigate = useAppNavigate();
   return (
     <Button
       variant="ghost"
@@ -15,7 +17,7 @@ export function LogoutButton({ to = "/" }: { to?: string }) {
       className="shrink-0 max-sm:size-10 max-sm:p-0"
       onClick={async () => {
         await api("/api/auth/logout", { method: "POST" }).catch(() => undefined);
-        router.replace(to);
+        navigate(to, { replace: true });
         router.refresh();
       }}
     >

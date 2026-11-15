@@ -1,9 +1,9 @@
 "use client";
 
 import { Menu, X } from "lucide-react";
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useId, useState } from "react";
+import { AppLink } from "@/components/app-link";
 import { isActiveNav } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
@@ -27,7 +27,7 @@ export function AreaNav({ nav }: { nav: { href: string; label: string }[] }) {
   const link = (n: { href: string; label: string }, mobile: boolean) => {
     const active = isActiveNav(pathname, n.href);
     return (
-      <Link
+      <AppLink
         key={n.href}
         href={n.href}
         aria-current={active ? "page" : undefined}
@@ -39,7 +39,7 @@ export function AreaNav({ nav }: { nav: { href: string; label: string }[] }) {
         )}
       >
         {n.label}
-      </Link>
+      </AppLink>
     );
   };
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCsp, isCsrfSafe, securityHeaders } from "../../../src/security/headers";
+import { buildCsp, isCsrfSafe, needsWasm, securityHeaders } from "../../../src/security/headers";
 
 describe("CSP (T028, FR-086)", () => {
   const csp = buildCsp({ nonce: "abc123", storageOrigin: "https://x.supabase.co" });
@@ -8,8 +8,13 @@ describe("CSP (T028, FR-086)", () => {
     // 'unsafe-eval' (eval JS) và 'unsafe-inline' bị cấm; 'wasm-unsafe-eval' CHỈ cho biên dịch WebAssembly
     expect(csp).not.toMatch(/script-src[^;]*'unsafe-(inline|eval)'/);
   });
-  it("cho biên dịch WebAssembly ở trình duyệt ('wasm-unsafe-eval') — MediaPipe Face Landmarker tự host", () => {
-    expect(csp).toMatch(/script-src [^;]*'wasm-unsafe-eval'/);
+  it("mặc định KHÔNG cho biên dịch WebAssembly", () => {
+    expect(csp).not.toContain("wasm-unsafe-eval");
+  });
+  it("route nhận diện mặt: thêm 'wasm-unsafe-eval' (MediaPipe tự host), vẫn cấm unsafe-eval/inline", () => {
+    const w = buildCsp({ nonce: "abc123", wasm: true });
+    expect(w).toMatch(/script-src [^;]*'wasm-unsafe-eval'/);
+    expect(w).not.toMatch(/script-src[^;]*'unsafe-(inline|eval)'/);
     // wasm + model tải từ chính origin (public/mediapipe) — không mở thêm nguồn ngoài
     expect(csp).toContain("connect-src 'self'");
     expect(csp).not.toMatch(/https:\/\/(cdn|storage\.googleapis)/);
@@ -61,4 +66,16 @@ describe("chống CSRF (FR-087)", () => {
     expect(
       isCsrfSafe({ ...base, method: "DELETE", origin: null, secFetchSite: "cross-site", hasSessionCookie: false }),
     ).toBe(false));
+});
+
+describe("needsWasm — route nào được biên dịch WebAssembly (nhận diện mặt ở trình duyệt)", () => {
+  it("trang thẻ SV và trang chẩn đoán", () => {
+    expect(needsWasm("/sv/the-sinh-vien")).toBe(true);
+    expect(needsWasm("/sv/the-sinh-vien/debug")).toBe(true);
+  });
+  it("route khác giữ CSP cũ (kể cả tên gần giống)", () => {
+    for (const p of ["/", "/sv", "/sv/lop", "/sv/dong-y", "/gv/lop", "/login", "/api/student/card", "/sv/the-sinh-vien-khac"]) {
+      expect(needsWasm(p), p).toBe(false);
+    }
+  });
 });

@@ -1,6 +1,6 @@
 import { SESSION_COOKIE } from "@utc/backend/auth/cookie";
 import { verifySession, type Role } from "@utc/backend/auth/jwt";
-import { buildCsp, isCsrfSafe, securityHeaders } from "@utc/backend/security/headers";
+import { buildCsp, isCsrfSafe, needsWasm, securityHeaders } from "@utc/backend/security/headers";
 import { NextResponse, type NextRequest } from "next/server";
 
 /**
@@ -53,7 +53,7 @@ export async function middleware(req: NextRequest) {
 
   const nonce = btoa(crypto.randomUUID());
   const storageOrigin = process.env.SUPABASE_URL ? new URL(process.env.SUPABASE_URL).origin : undefined;
-  const csp = buildCsp({ nonce, dev, storageOrigin });
+  const csp = buildCsp({ nonce, dev, storageOrigin, wasm: needsWasm(pathname) });
 
   const requestHeaders = new Headers(req.headers);
   requestHeaders.set("x-nonce", nonce);

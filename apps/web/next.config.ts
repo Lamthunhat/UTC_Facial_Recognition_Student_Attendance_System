@@ -71,6 +71,10 @@ const nextConfig: NextConfig = {
   outputFileTracingExcludes: {
     "*": OTHER_PLATFORM_BINARIES,
   },
+  // Tài nguyên MediaPipe tự host: tên file/thư mục có phiên bản/hash (lib/student/mediapipe-assets.ts) → cache vĩnh viễn
+  async headers() {
+    return [{ source: "/mediapipe/:path*", headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }] }];
+  },
 };
 
 export default nextConfig;

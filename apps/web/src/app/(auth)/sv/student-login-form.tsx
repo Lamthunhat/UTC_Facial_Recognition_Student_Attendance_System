@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Alert, Field, Input } from "@/components/ui/input";
+import { useAppNavigate } from "@/components/app-link";
 import { api, ApiError } from "@/lib/api";
 
 type LoginResult = { student: { consentValid: boolean; hasActiveCard: boolean } };
@@ -19,6 +20,7 @@ function safeNext(next: string | null) {
  */
 export function StudentLoginForm() {
   const router = useRouter();
+  const navigate = useAppNavigate();
   const params = useSearchParams();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -31,7 +33,7 @@ export function StudentLoginForm() {
     try {
       const res = await api<LoginResult>("/api/auth/student/login", { method: "POST", json: { studentCode: code } });
       const next = safeNext(params.get("next"));
-      router.replace(res.student.consentValid ? next : `/sv/dong-y?next=${encodeURIComponent(next)}`);
+      navigate(res.student.consentValid ? next : `/sv/dong-y?next=${encodeURIComponent(next)}`, { replace: true });
       router.refresh();
     } catch (err) {
       if (err instanceof ApiError && err.status === 429) {
