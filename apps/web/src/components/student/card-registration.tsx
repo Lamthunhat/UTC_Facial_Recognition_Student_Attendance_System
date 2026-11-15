@@ -3,9 +3,10 @@
 import { CheckCircle2, Clock } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useReducer, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { CardCapture } from "@/components/camera/CardCapture";
 import { FaceChallenge } from "@/components/camera/FaceChallenge";
+import { SubmitProgress } from "@/components/student/submit-progress";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
@@ -94,7 +95,20 @@ export function CardRegistration({ onFinished }: { onFinished: () => void }) {
     }
   }
 
+  // Khoá gửi: một lượt gửi tại một thời điểm (không gửi lại khi đang xử lý)
+  const sending = useRef(false);
+
   async function submit(frames: Blob[]) {
+    if (s.step !== "face" || sending.current) return;
+    sending.current = true;
+    try {
+      await send(frames);
+    } finally {
+      sending.current = false;
+    }
+  }
+
+  async function send(frames: Blob[]) {
     if (s.step !== "face") return;
     const { card, nonce, expiresAt } = s;
     frames.forEach((frame) => dispatch({ type: "FRAME_CAPTURED", frame }));
@@ -180,9 +194,7 @@ export function CardRegistration({ onFinished }: { onFinished: () => void }) {
       return (
         <div className="flex flex-col gap-4">
           <Stepper current={3} />
-          <p className="rounded-lg bg-muted p-6 text-center text-sm" role="status" aria-live="polite">
-            Đang kiểm tra thẻ và khuôn mặt… có thể mất tới 30 giây. Vui lòng không đóng trang.
-          </p>
+          <SubmitProgress />
         </div>
       );
     case "done":
