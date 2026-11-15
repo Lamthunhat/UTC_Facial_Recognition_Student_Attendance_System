@@ -117,6 +117,10 @@ Chạy lại với cùng email = đặt lại mật khẩu và thu hồi mọi p
 5. Settings → Deployment Protection: bật cho Preview (chỉ thành viên team xem được).
 6. Deploy bản **Preview** trước (push nhánh `001-attendance-core` hoặc `vercel` CLI), chạy checklist §7, đạt rồi mới lên Production.
 
+## 6b. Dữ liệu đọc thẻ trong bản đóng gói
+
+`apps/web/card-assets/` (dữ liệu OCR tiếng Việt + wasm zxing) được tạo lúc build bởi `scripts/card-assets.mjs` (chép từ `node_modules`, kiểm sha256 đã ghim — đổi phiên bản gói thì build hỏng cho tới khi cập nhật hash). Code chạy chỉ đọc theo `<thư mục chạy>/card-assets`. `pnpm check:traces` (chạy trong `buildCommand`) hỏng nếu thiếu file trong trace của `/api/student/card` hoặc nếu đọc thử một thẻ giả trong thư mục mô phỏng output đã trace không được.
+
 ## 7. Checklist sau deploy
 
 Ghi kết quả (thời gian, số đo) vào PR/issue deploy. Thay `<url>` bằng URL deployment.
