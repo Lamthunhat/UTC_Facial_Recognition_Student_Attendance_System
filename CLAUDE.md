@@ -29,7 +29,7 @@
 | 4 US6 thẻ SV | 12/12 | Backend trên `main` (PR #1); UI T062/T063 trên nhánh `001-us6-ui` (PR #2) |
 | 5–11 (US2, US3, US5, US4, US9, US8, US7) | 0 | |
 | 12 Polish | 0/14 | Có T144 (Turnstile) |
-- Test (lần chạy gần nhất): backend **432**, database **51**, shared **22**, web **56** (`apps/web/tests/unit`, vitest) — tổng 561, đều pass. `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm check:traces` pass.
+- Test (lần chạy gần nhất): backend **438**, database **51**, shared **22**, web **57** (`apps/web/tests/unit`, vitest) — tổng 568, đều pass. `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm check:traces` pass.
 
 ### 4. Quyết định đã chốt
 - Body request ≤ **4 MB** (giới hạn 4,5 MB của Vercel): danh sách lớp 4 MB, ảnh thẻ 1 MB, mỗi khung mặt 1 MB (FR-090, FR-100, research R14).
@@ -46,6 +46,7 @@
 - Biến môi trường kiểm **lúc khởi động** (`apps/web/src/instrumentation.ts` → `checkEnvOnStartup` trong `packages/backend/src/startup.ts`, chỉ runtime nodejs; không chạy lúc `next build`): thiếu/sai → log `env_invalid` chỉ tên biến, mọi request 500 (Next 15 không thoát tiến trình). `pglite:` chỉ bắt buộc `DATABASE_URL`, `JWT_SECRET`, `LOG_HMAC_SECRET`; `VERCEL=1` + `pglite:` **luôn bị chặn**; `NODE_ENV=production` + `pglite:` (vd. `next start` cục bộ) chỉ chạy khi `ALLOW_LOCAL_PGLITE=1` (log warn `pglite_production_local`); Postgres bắt buộc thêm `SUPABASE_*`, `CRON_SECRET`.
 - UI thẻ SV (T062/T063): logic thuần trong `apps/web/src/lib/student/*` (có test): nén ảnh (thẻ cạnh dài 1600 px ≤ 1 MB, khung mặt 1280 px ≤ 0,9 MB → tổng ≤ 4 MB), mã lỗi → hướng dẫn (mã lạ → thông báo chung), máy trạng thái `card-flow.ts` (bỏ khung mặt khỏi state khi gửi). Camera: `components/camera/use-camera.ts` tắt track khi gỡ/ẩn trang/pagehide, bỏ luồng về muộn (số thứ tự yêu cầu). **Không có** `<input type=file>`/`<input capture>` (FR-045); mở trong webview (Zalo, Facebook…) → hướng dẫn mở bằng Chrome/Safari. Nonce mới mỗi lần làm lại khuôn mặt. Trang chẩn đoán camera `/sv/the-sinh-vien/debug` (không gửi/lưu ảnh). **Thẻ SV UTC là thẻ DỌC** (CR80 54:85,6): khung hướng dẫn dọc cao 80 % vùng xem (`cardGuideRect`), ảnh gửi = vùng cắt theo khung (`ImageCapture.takePhoto` khi cùng tỉ lệ với video, không thì khung video); cạnh dài vùng cắt < 500 px **chặn**, 500–999 **cảnh báo** + "Vẫn dùng ảnh này" (research R3). Server: zxing `tryRotate` + `tryInvert`; OCR xoay 90°/270° **chỉ khi không đọc được mã vạch**; cả chuỗi tính 1 lượt; dev log `card_register_timing`. SV chỉ thấy trạng thái thẻ (`active`/`pending_review`/`rejected`/`reset`), không bao giờ thấy lý do.
 - Kho ảnh dev: `DATABASE_URL=pglite:` + không `SUPABASE_URL` + không Vercel + không production (trừ `ALLOW_LOCAL_PGLITE=1`) → `.local-storage/` (gitignore), signed URL = `data:`. `student_cards.ocr_name` chỉ lưu khi NAME_MISMATCH (migration 0004).
+- Lỗi Supabase Storage (`evidence/storage.ts`): log `storage_request_failed` (op, bucket, host, status, statusCode/error/message — không key); "Bucket not found" → 503 `STORAGE_BUCKET_MISSING` + log `storage_bucket_missing` (UI: dừng, báo quản trị viên). Upload lỗi → dọn file đã lên, không dòng DB/audit (test). Kiểm 4 bucket mỗi project: `docs/deploy.md` §4.
 - CodeQL: repo private → `upload: never` + `.github/scripts/codeql-gate.mjs` chặn theo SARIF.
 
 ### 5. Đang dở

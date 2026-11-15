@@ -95,6 +95,37 @@ on conflict (id) do nothing;
 
 Không tạo policy cho `anon`/`authenticated`: chỉ server (service role) đọc/ghi; trình duyệt nhận signed URL 5 phút.
 
+### Kiểm 4 bucket — làm cho **từng** project Supabase (Preview và Production nếu tách riêng)
+
+Thiếu bucket thì đăng ký thẻ lỗi 503 `STORAGE_BUCKET_MISSING`; log function có dòng `{"msg":"storage_bucket_missing","op":"upload","bucket":"cards","host":"<ref>.supabase.co",…}` — `host` cho biết đang nói tới project nào.
+
+**Cách 1 — SQL Editor của project đó** (không cần key). Kết quả phải đủ **4 dòng**, cột `public` đều `false`:
+
+```sql
+select b.id, b.public, b.file_size_limit, b.allowed_mime_types
+from (values ('cards'), ('evidence'), ('leave'), ('disputes')) as want(id)
+left join storage.buckets b on b.id = want.id
+order by want.id;
+-- dòng nào toàn NULL = bucket đó CHƯA tạo → chạy lại khối insert ở trên
+```
+
+**Cách 2 — từ máy, qua REST** (dùng service role key của đúng project đó; chỉ in tên bucket + public, **không in key**). PowerShell:
+
+```powershell
+# Đặt cho riêng phiên này, không ghi vào file
+$env:SB_URL = "https://<ref>.supabase.co"; $env:SB_KEY = "<service_role key của project này>"
+$h = @{ Authorization = "Bearer $env:SB_KEY"; apikey = $env:SB_KEY }
+$b = Invoke-RestMethod -Uri "$env:SB_URL/storage/v1/bucket" -Headers $h
+"cards","evidence","leave","disputes" | ForEach-Object { $x = $b | Where-Object id -eq $_; "{0,-9} {1}" -f $_, ($(if ($x) { "có, public=$($x.public)" } else { "THIẾU" })) }
+Remove-Item Env:SB_URL, Env:SB_KEY
+```
+
+Checklist mỗi project:
+
+- [ ] Đủ 4 bucket `cards`, `evidence`, `leave`, `disputes`; tất cả `public = false`.
+- [ ] `SUPABASE_URL` trên Vercel của môi trường đó (Preview / Production) trỏ đúng `<ref>` của project vừa kiểm.
+- [ ] Thử đăng ký thẻ (checklist §7): log không có `storage_bucket_missing` / `storage_request_failed`.
+
 ## 5. Tạo tài khoản Admin đầu tiên
 
 ```powershell
