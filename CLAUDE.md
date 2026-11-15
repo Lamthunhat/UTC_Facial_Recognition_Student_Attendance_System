@@ -2,7 +2,7 @@
 
 ## Trạng thái & quy ước
 
-*Cập nhật 2026-11-10. Đọc file này trước khi làm tiếp; kiểm lại repo nếu nghi ngờ thông tin đã cũ.*
+*Cập nhật 2026-11-16. Đọc file này trước khi làm tiếp; kiểm lại repo nếu nghi ngờ thông tin đã cũ.*
 
 ### 1. Dự án
 - Hệ thống điểm danh sinh viên Trường ĐH Giao thông Vận tải (UTC) bằng khuôn mặt + GPS; giao diện tiếng Việt.
@@ -23,12 +23,12 @@
 | Phase | Xong / tổng | Ghi chú |
 |---|---|---|
 | 1 Setup | 8/8 | |
-| 1b Spike | 0/4 | T009 còn đo trên Vercel; T010 mới 1/5 thẻ thật (Code128 = mã SV); T011 hiệu chỉnh ngưỡng; T012 Go/No-Go |
+| 1b Spike | 0/4 | T009: Vercel 1 mẫu — đăng ký thẻ 201 = **6,84 s** (> 5 s), 422 = 4,97 s; còn nhiều mẫu + bộ nhớ. T010: thêm 1 thẻ thật OK trên iPhone (còn ≥ 4). T011 hiệu chỉnh ngưỡng; T012 Go/No-Go |
 | 2 Foundational | 27/27 | |
 | 3 US1 lớp + danh sách | 13/13 | |
 | 4 US6 thẻ SV | 12/12 | Backend trên `main` (PR #1); UI T062/T063 trên nhánh `001-us6-ui` (PR #2) |
 | 5–11 (US2, US3, US5, US4, US9, US8, US7) | 0 | |
-| 12 Polish | 0/14 | Có T144 (Turnstile) |
+| 12 Polish | 0/15 | Có T144 (Turnstile), T145 (tối ưu thời gian đăng ký thẻ) |
 - Test (lần chạy gần nhất): backend **444**, database **51**, shared **22**, web **58** (`apps/web/tests/unit`, vitest) — tổng 575, đều pass. `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm check:traces` pass.
 
 ### 4. Quyết định đã chốt
@@ -54,12 +54,12 @@
 - **CI không tự chạy — đã tự hết** (kiểm 2026-11-09): push `e75198e` lên nhánh PR → `ping` tự chạy cả `push` lẫn `pull_request`, `CI` tự chạy `pull_request`. Sự cố 2026-11-07 (4 lần push `main` không sinh run) nghi phía GitHub với repo mới; `ci.yml` đúng cú pháp (`push: branches: [main]`, `pull_request:` mọi nhánh, `workflow_dispatch:`). Push lên nhánh tính năng chỉ chạy CI qua `pull_request` khi có PR mở — đúng thiết kế. `ping.yml` đã xoá. Chạy tay vẫn được: `gh workflow run CI --ref <nhánh>`.
 - Kiểm Preview cần `$env:VERCEL_BYPASS` (Preview có Deployment Protection, trả 302 sang SSO).
 - `LOG_HMAC_SECRET`: đã có ở `apps/web/.env.local`; **cần đặt trên Vercel** (Preview + Production) — thiếu thì server không khởi động.
-- Đo cold/warm + bộ nhớ `POST /api/student/card` trên Preview (cục bộ: ~4,4 s / ~1,9 s, RSS ~600 MB); xác nhận đường dẫn model theo `process.cwd()` trên Vercel.
+- **Thử thật 2026-11-16** (iPhone iOS 18.4 Safari, Preview, 1 thẻ UTC thật): đăng ký thành công; quay sai hướng → `LIVENESS_FAILED` (tính lượt đúng); GV đặt lại → "Cần đăng ký lại" → đăng ký lại OK. Camera: luồng 1440×2560, `takePhoto` 2160×3840, vùng thẻ 1046×1658. Vercel: 201 = 6,84 s, 422 = 4,97 s, reset = 1,57 s; **bộ nhớ chưa đo**; Android chưa thử (research "Kết quả thử thật").
 - Theo người dùng: Preview và Production đang dùng chung một Supabase — cần tách.
 - Token `gh` thiếu quyền `workflow` → push sửa `ci.yml` phải qua Git Credential Manager (hoặc `gh auth refresh -s workflow`).
 
 ### 6. Việc tiếp theo (theo thứ tự)
-1. Thử UI US6 trên điện thoại thật (Android Chrome, iOS Safari) với thẻ + mặt thật (chỉ cục bộ, không lưu ảnh) → merge PR #2.
+1. Thử UI US6 trên Android Chrome (iPhone đã OK) → merge PR #2. T145: đưa thời gian đăng ký thẻ về ≤ 5 s.
 2. Xử lý các mục §5 (Preview, đo đăng ký thẻ, tách Supabase).
 3. Phase 5 US2 check-in (dùng lại `use-camera`, `FaceChallenge`, `card-errors`).
 4. Polish: T144 Turnstile khi vượt ngưỡng IP; nâng các action Node 20 (`checkout`, `setup-node`, `codeql-action`…); cron dọn ảnh hết hạn; cảnh báo `jose` (Edge runtime) ở middleware.

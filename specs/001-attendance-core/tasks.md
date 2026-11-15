@@ -46,8 +46,8 @@ US1 (P1) → US6 (P1, thẻ SV — cần trước khi điểm danh) → US2 (P1)
 
 **Purpose**: Xác nhận các giả định rủi ro nhất trước khi xây phần còn lại
 
-- [ ] T009 Spike *(cục bộ xong 2026-11-07: ~48 ms/ảnh, bundle 105,6 MB — còn đo trên Vercel)*: route thử `apps/web/src/app/api/spike/face/route.ts` chạy `onnxruntime-node` detect + embed trên 1 ảnh; deploy preview Vercel, ghi kích thước bundle, cold start, latency 1 ảnh và 3 khung vào `specs/001-attendance-core/research.md` (R1)
-- [ ] T010 [P] Spike *(1/5 thẻ: mã vạch Code128 = mã SV — còn ≥ 4 thẻ)*: đọc mã vạch + OCR trên ≥ 5 ảnh thẻ UTC thật bằng `zxing-wasm`/`tesseract.js` trong `packages/backend/scripts/spike-card.ts`; ghi kết quả mã vạch có chứa mã SV hay không vào research.md (R3)
+- [ ] T009 Spike *(cục bộ xong 2026-11-07: ~48 ms/ảnh, bundle 105,6 MB; Vercel 2026-11-16, 1 mẫu: đăng ký thẻ 201 = 6,84 s, 422 liveness = 4,97 s — vượt 5 s; còn đo nhiều mẫu cold/warm + bộ nhớ, xem research "Kết quả thử thật")*: route thử `apps/web/src/app/api/spike/face/route.ts` chạy `onnxruntime-node` detect + embed trên 1 ảnh; deploy preview Vercel, ghi kích thước bundle, cold start, latency 1 ảnh và 3 khung vào `specs/001-attendance-core/research.md` (R1)
+- [ ] T010 [P] Spike *(1/5 thẻ: mã vạch Code128 = mã SV; 2026-11-16: 1 thẻ thật đăng ký thành công trên iPhone iOS 18.4 Safari qua Vercel — còn ≥ 4 thẻ khác)*: đọc mã vạch + OCR trên ≥ 5 ảnh thẻ UTC thật bằng `zxing-wasm`/`tesseract.js` trong `packages/backend/scripts/spike-card.ts`; ghi kết quả mã vạch có chứa mã SV hay không vào research.md (R3)
 - [ ] T011 [P] Spike: script hiệu chỉnh `packages/backend/scripts/calibrate.ts` tính cosine thẻ↔selfie, selfie↔selfie, người khác; chạy trên ≥ 20 tình nguyện viên, ghi ngưỡng sơ bộ `CARD_REJECT_BELOW`, `CARD_ACCEPT_ABOVE`, `DUPLICATE_ABOVE`, `CHECKIN_MATCH_ABOVE` vào research.md
 - [ ] T012 Quyết định Go/No-Go: nếu T009 không đạt p95 ≤ 5 s → cập nhật `specs/001-attendance-core/plan.md`, `specs/001-attendance-core/research.md` và `.specify/memory/constitution.md` (VII) sang service Python riêng trước khi tiếp tục
 
@@ -348,6 +348,7 @@ US1 (P1) → US6 (P1, thẻ SV — cần trước khi điểm danh) → US2 (P1)
 - [ ] T141 [P] Rà soát truy cập (a11y) và hiển thị di động cho màn hình SV trong `apps/web/src/app/sv/**`
 - [ ] T142 [P] README + hướng dẫn triển khai Vercel/Supabase, biến môi trường trong `README.md`, `docs/deploy.md`
 - [ ] T143 Chạy toàn bộ quickstart.md (Q1–Q27, S1–S11) và đánh dấu kết quả trong `specs/001-attendance-core/quickstart.md`
+- [ ] T145 [P] Tối ưu thời gian đăng ký thẻ (Vercel 1 mẫu: 6,84 s > 5 s): zxing thử ở kích thước nhỏ trước rồi mới phóng to; cân nhắc bỏ OCR họ tên khi mã vạch đã đọc được, hoặc chạy OCR song song với nhận diện mặt/liveness; đo bộ nhớ function (log `card_register_timing` ở Preview) trong `packages/backend/src/card/decode.ts`, `packages/backend/src/card/register.ts`
 - [ ] T144 [P] Đăng nhập SV vượt ngưỡng thất bại theo IP (50/5 phút) → hiện thử thách Cloudflare Turnstile (xác minh token ở server, khoá site/secret qua env) thay vì trả 429, để cả lớp sau NAT Wi-Fi không bị chặn cứng; giữ 429 làm phương án dự phòng khi Turnstile lỗi; thêm `security_events` cho thử thách thất bại trong `packages/backend/src/auth/student-login.ts`, `packages/backend/src/security/turnstile.ts`, `apps/web/src/app/(auth)/sv/page.tsx` (FR-083: "thử thách chống bot")
 
 ---

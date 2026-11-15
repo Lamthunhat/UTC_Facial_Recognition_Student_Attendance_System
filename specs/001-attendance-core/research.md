@@ -142,3 +142,27 @@ Mỗi mục theo dạng: Quyết định · Lý do · Phương án đã cân nh�
 - Thời gian đọc: 45 ms (ảnh xám + tăng tương phản), 180–210 ms (ảnh gốc/phóng to).
 - `zxing-wasm` mặc định tải wasm từ CDN → phải nạp `zxing_reader.wasm` từ `node_modules` qua `prepareZXingModule({ overrides: { wasmBinary } })` và đính kèm file vào function.
 - **Còn thiếu**: thử thêm ≥ 4 thẻ khác (khoá khác, thẻ cũ/mờ).
+
+## Kết quả thử thật (2026-11-16, Vercel Preview + iPhone — T009/T010 phần 2)
+
+Người dùng tự thử: iPhone, **iOS 18.4 Safari**, Vercel Preview của PR #2 (sau khi sửa đóng gói `card-assets/`), **1 thẻ UTC thật** (thẻ dọc).
+
+**Luồng (US6)**
+- Đăng ký thẻ **thành công** (thẻ thật + mặt thật, thử thách quay đầu).
+- Quay sai hướng → `LIVENESS_FAILED`, lượt bị tính đúng.
+- Giảng viên đặt lại thẻ → SV thấy "Cần đăng ký lại" → đăng ký lại thành công.
+
+**Camera (R3 — số liệu từ `/sv/the-sinh-vien/debug`)**
+- Luồng camera sau: **1440×2560** (dọc); khả năng tối đa 4032×3024; `takePhoto`: **2160×3840**.
+- Vùng thẻ cắt theo khung dọc: **1046×1658** → cạnh dài ≥ 1000 px, qua ngưỡng "ổn" (không cảnh báo).
+
+**Thời gian trên Vercel (T009 — 1 mẫu mỗi loại, chưa rõ cold/warm)**
+
+| Request | Kết quả | Thời gian |
+|---|---|---|
+| `POST /api/student/card` | 201 (đăng ký thành công) | **6,84 s** |
+| `POST /api/student/card` | 422 `LIVENESS_FAILED` | 4,97 s |
+| `POST /api/admin/students/{id}/card/reset` | 200 | 1,57 s |
+
+- 201 = 6,84 s **vượt ngưỡng p95 ≤ 5 s của T012** (1 mẫu — cần thêm mẫu cold/warm trước khi quyết Go/No-Go). Bộ nhớ function **chưa đo**.
+- Hướng tối ưu (task Polish T145): zxing thử ở kích thước nhỏ trước; bỏ OCR họ tên khi mã vạch đã đọc được hoặc chạy song song với nhận diện mặt; đo bộ nhớ.
