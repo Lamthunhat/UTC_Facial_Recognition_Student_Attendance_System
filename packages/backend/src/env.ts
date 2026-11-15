@@ -29,9 +29,27 @@ const base = {
   LEAVE_FIELD_CONFIDENCE: threshold.default(0.8),
   LEAVE_CHAT_APPROVAL_CONFIDENCE: threshold.default(0.85),
 };
+/**
+ * SUPABASE_URL phải là ORIGIN thuần: https://<ref>.supabase.co — không path (hay dán nhầm ".../rest/v1"), không "/" cuối,
+ * không query. http chỉ cho localhost/127.0.0.1 (Supabase CLI). Thông báo lỗi không chứa giá trị.
+ */
+const SUPABASE_ORIGIN_MSG =
+  "SUPABASE_URL phải là origin thuần dạng https://<ref>.supabase.co (không path, không '/' cuối) — nếu có '/rest/v1' thì bỏ đi";
+const supabaseOrigin = z.string().refine((v) => {
+  let u: URL;
+  try {
+    u = new URL(v);
+  } catch {
+    return false;
+  }
+  const local = u.hostname === "localhost" || u.hostname === "127.0.0.1";
+  const schemeOk = u.protocol === "https:" || (u.protocol === "http:" && local);
+  return schemeOk && v === u.origin; // origin không có path, "/" cuối, query, hash, user:pass
+}, SUPABASE_ORIGIN_MSG);
+
 /** Storage + cron: bắt buộc với Postgres (Supabase/Vercel). */
 const hosted = {
-  SUPABASE_URL: z.string().url(),
+  SUPABASE_URL: supabaseOrigin,
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(20),
   CRON_SECRET: z.string().min(16),
 };
