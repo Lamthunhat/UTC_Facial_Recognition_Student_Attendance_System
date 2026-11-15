@@ -38,6 +38,7 @@ const KNOWN: Record<string, { action: AdviceAction; message: string }> = {
   UNAUTHORIZED: { action: "login", message: "Phiên đăng nhập đã hết. Vui lòng đăng nhập lại." },
   CARD_ALREADY_REGISTERED: { action: "refresh", message: "Bạn đã có thẻ. Đang cập nhật trạng thái…" },
   CARD_PENDING_REVIEW: { action: "refresh", message: "Thẻ của bạn đang chờ giảng viên duyệt." },
+  OCR_UNAVAILABLE: { action: "retake-face", message: "Hệ thống tạm thời không đọc được thẻ. Vui lòng thử lại sau ít phút." },
   NOT_ENROLLED: { action: "stop", message: "Mã sinh viên của bạn chưa có trong lớp đang học nào. Vui lòng liên hệ giảng viên." },
 };
 
@@ -58,8 +59,10 @@ export function cardErrorAdvice(e: { status: number; code: string; remainingAtte
   }
   let base: { action: AdviceAction; message: string };
   if (e.status === 0) base = KNOWN.NETWORK;
-  else if (e.status >= 500) base = { action: "retake-face", message: "Máy chủ đang bận. Vui lòng thử lại sau ít phút." };
-  else base = KNOWN[e.code] ?? { action: "retake-face", message: GENERIC };
+  else if (KNOWN[e.code]) base = KNOWN[e.code];
+  // Lỗi máy chủ không bắt được: nói rõ mã để SV báo lại (không giả là "đang bận")
+  else if (e.status >= 500) base = { action: "retake-face", message: `Lỗi máy chủ (mã ${e.status}). Vui lòng thử lại sau ít phút hoặc báo giảng viên.` };
+  else base = { action: "retake-face", message: GENERIC };
 
   if (e.remainingAttempts === 0) {
     return { action: "stop", message: `${base.message} Bạn đã hết lượt thử trong giờ này, vui lòng thử lại sau.` };

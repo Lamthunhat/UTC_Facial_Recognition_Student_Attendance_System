@@ -49,6 +49,17 @@ describe("cardErrorAdvice", () => {
     expect(cardErrorAdvice({ status: 500, code: "INTERNAL" }).action).toBe("retake-face");
   });
 
+  it("lỗi máy chủ không bắt được → 'Lỗi máy chủ (mã 500)', không phải 'Máy chủ đang bận'", () => {
+    const a = cardErrorAdvice({ status: 500, code: "ERROR" });
+    expect(a.message).toMatch(/^Lỗi máy chủ \(mã 500\)/);
+    expect(a.message).not.toMatch(/đang bận/);
+    expect(cardErrorAdvice({ status: 502, code: "ERROR" }).message).toMatch(/mã 502/);
+  });
+
+  it("OCR tạm không dùng được (503 OCR_UNAVAILABLE) → thông báo riêng", () => {
+    expect(cardErrorAdvice({ status: 503, code: "OCR_UNAVAILABLE" }).message).toMatch(/tạm thời/);
+  });
+
   it("mã lạ (kể cả DUPLICATE_FACE) → thông báo chung, không lộ mã", () => {
     for (const code of ["DUPLICATE_FACE", "LIVE_MISMATCH", "NAME_MISMATCH", "XYZ"]) {
       const a = cardErrorAdvice({ status: 422, code });
