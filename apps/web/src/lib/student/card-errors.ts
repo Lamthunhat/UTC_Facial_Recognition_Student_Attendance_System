@@ -38,6 +38,7 @@ const KNOWN: Record<string, { action: AdviceAction; message: string }> = {
   UNAUTHORIZED: { action: "login", message: "Phiên đăng nhập đã hết. Vui lòng đăng nhập lại." },
   CARD_ALREADY_REGISTERED: { action: "refresh", message: "Bạn đã có thẻ. Đang cập nhật trạng thái…" },
   CARD_PENDING_REVIEW: { action: "refresh", message: "Thẻ của bạn đang chờ giảng viên duyệt." },
+  STORAGE_BUCKET_MISSING: { action: "stop", message: "Hệ thống lưu ảnh chưa được cấu hình. Vui lòng báo giảng viên hoặc quản trị viên." },
   OCR_UNAVAILABLE: { action: "retake-face", message: "Hệ thống tạm thời không đọc được thẻ. Vui lòng thử lại sau ít phút." },
   NOT_ENROLLED: { action: "stop", message: "Mã sinh viên của bạn chưa có trong lớp đang học nào. Vui lòng liên hệ giảng viên." },
 };

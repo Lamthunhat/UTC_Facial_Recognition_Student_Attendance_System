@@ -1,6 +1,8 @@
 import "server-only";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import nodePath from "node:path";
+import { HttpError } from "../http/errors";
+import { log } from "../log";
 
 /**
  * T034 — Supabase Storage qua REST, chỉ ở server với service-role key (Constitution IV/IX).
@@ -44,6 +46,37 @@ export function assertSafePath(path: string) {
 
 const encodePath = (p: string) => p.split("/").map(encodeURIComponent).join("/");
 
+/**
+ * Phản hồi lỗi của Supabase Storage → log có cấu trúc (thao tác, bucket, host, status + statusCode/error/message
+ * trong body; KHÔNG BAO GIỜ key) rồi ném lỗi. "Bucket not found" = lỗi cấu hình (chưa tạo bucket trên project
+ * Supabase này) → 503 STORAGE_BUCKET_MISSING + log storage_bucket_missing.
+ */
+async function storageFailure(res: Response, op: "upload" | "sign" | "remove", bucket: Bucket): Promise<never> {
+  const raw = await res.text().catch(() => "");
+  let body: { statusCode?: unknown; error?: unknown; message?: unknown } = {};
+  try {
+    body = JSON.parse(raw) as typeof body;
+  } catch {
+    body = { message: raw };
+  }
+  const short = (v: unknown) => (v === undefined || v === null ? undefined : String(v).slice(0, 300));
+  const host = (() => {
+    try {
+      return new URL(process.env.SUPABASE_URL ?? "").host;
+    } catch {
+      return null;
+    }
+  })();
+  const info = { op, bucket, host, status: res.status, statusCode: short(body.statusCode), error: short(body.error), message: short(body.message) };
+  if (/bucket not found/i.test(`${info.error ?? ""} ${info.message ?? ""}`)) {
+    log.error("storage_bucket_missing", info);
+    throw new HttpError(503, "STORAGE_BUCKET_MISSING", "Kho lưu ảnh chưa được cấu hình. Vui lòng báo quản trị viên.");
+  }
+  log.error("storage_request_failed", info);
+  const label = op === "upload" ? "Upload" : op === "sign" ? "Tạo signed URL" : "Xoá file";
+  throw new Error(`${label} thất bại (${res.status})`);
+}
+
 export async function uploadObject(bucket: Bucket, path: string, body: Buffer, contentType: string) {
   assertSafePath(path);
   if (storageMode() === "local") {
@@ -58,7 +91,7 @@ export async function uploadObject(bucket: Bucket, path: string, body: Buffer, c
     headers: { ...headers, "Content-Type": contentType, "x-upsert": "false", "Cache-Control": "no-store" },
     body: new Uint8Array(body),
   });
-  if (!res.ok) throw new Error(`Upload thất bại (${res.status})`);
+  if (!res.ok) await storageFailure(res, "upload", bucket);
   return path;
 }
 
@@ -74,7 +107,7 @@ export async function signedUrl(bucket: Bucket, path: string, ttlSec = SIGNED_UR
     headers: { ...headers, "Content-Type": "application/json" },
     body: JSON.stringify({ expiresIn: ttlSec }),
   });
-  if (!res.ok) throw new Error(`Tạo signed URL thất bại (${res.status})`);
+  if (!res.ok) await storageFailure(res, "sign", bucket);
   const data = (await res.json()) as { signedURL?: string };
   if (!data.signedURL) throw new Error("Phản hồi signed URL không hợp lệ");
   return `${process.env.SUPABASE_URL!.replace(/\/$/, "")}/storage/v1${data.signedURL}`;
@@ -93,5 +126,5 @@ export async function removeObjects(bucket: Bucket, paths: string[]) {
     headers: { ...headers, "Content-Type": "application/json" },
     body: JSON.stringify({ prefixes: paths }),
   });
-  if (!res.ok) throw new Error(`Xoá file thất bại (${res.status})`);
+  if (!res.ok) await storageFailure(res, "remove", bucket);
 }

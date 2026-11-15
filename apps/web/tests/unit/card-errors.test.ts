@@ -56,6 +56,12 @@ describe("cardErrorAdvice", () => {
     expect(cardErrorAdvice({ status: 502, code: "ERROR" }).message).toMatch(/mã 502/);
   });
 
+  it("kho ảnh chưa cấu hình (503 STORAGE_BUCKET_MISSING) → dừng, báo quản trị viên (thử lại không giúp gì)", () => {
+    const a = cardErrorAdvice({ status: 503, code: "STORAGE_BUCKET_MISSING" });
+    expect(a.action).toBe("stop");
+    expect(a.message).toMatch(/quản trị viên/);
+  });
+
   it("OCR tạm không dùng được (503 OCR_UNAVAILABLE) → thông báo riêng", () => {
     expect(cardErrorAdvice({ status: 503, code: "OCR_UNAVAILABLE" }).message).toMatch(/tạm thời/);
   });

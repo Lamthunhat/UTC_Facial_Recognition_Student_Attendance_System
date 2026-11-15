@@ -93,6 +93,7 @@ const fakeDeps: CardDeps = {
   },
   storage: {
     upload: async (bucket, path, body, contentType) => {
+      if (uploadFailAt !== null && uploads.length === uploadFailAt) throw uploadError();
       uploads.push({ bucket, path, body, contentType });
       return path;
     },
@@ -102,6 +103,9 @@ const fakeDeps: CardDeps = {
     signedUrl: async (bucket, path) => `https://storage.test/${bucket}/${path}?token=t`,
   },
 };
+/** Giả lập upload lỗi ở lần upload thứ uploadFailAt (0 = ảnh thẻ, 1 = chân dung); null = không lỗi. */
+let uploadFailAt: number | null = null;
+let uploadError: () => Error = () => new Error("Upload thất bại (500)");
 const goodFace: PortraitFace = goodFaceBase;
 const scenario = (code: string, seed: number, over: Partial<{ method: "barcode" | "ocr"; text: string; faces: PortraitFace[] }> = {}) => {
   nextDecode = { decoded: { code, method: over.method ?? "barcode" }, text: over.text ?? "" };
@@ -208,6 +212,7 @@ afterAll(async () => {
   await ctx.close();
 });
 beforeEach(async () => {
+  uploadFailAt = null;
   uploads.length = 0;
   removed.length = 0;
   await q(`delete from rate_limits`); // mỗi ca độc lập; ca kiểm rate limit tự làm trong một `it`
@@ -282,6 +287,46 @@ describe("nonce dùng một lần (FR-082)", () => {
     const again = await submit("G", n);
     expect(again.status).toBe(403);
     expect((await readJson(again)).error.code).toBe("BAD_NONCE");
+  });
+});
+
+describe("upload ảnh lỗi → không còn dòng DB / audit / file dở dang", () => {
+  const fresh = async (code: string) => {
+    const id = (await q<{ id: string }>(`insert into students (student_code,last_name,first_name) values ($1,'Thử','Upload') returning id`, [code]))[0].id;
+    await q(`insert into enrollments (class_id, student_id) values ($1,$2)`, [ids.K1, id]);
+    ids[code] = id;
+    cookie[code] = `${SESSION_COOKIE}=${(await createSession(id, "student")).token}`;
+    await consent(code);
+    return id;
+  };
+  const leftovers = async (id: string) => ({
+    cards: (await q(`select 1 from student_cards where student_id=$1`, [id])).length,
+    audits: (await q(`select 1 from audit_logs where action='card.register' and actor_id=$1`, [id])).length,
+  });
+
+  it("ảnh chân dung upload lỗi (ảnh thẻ đã lên) → xoá ảnh thẻ đã lên; không có thẻ, không có audit", async () => {
+    const id = await fresh("231230895");
+    scenario("231230895", 95);
+    uploadFailAt = 1;
+    const res = await submit("231230895");
+    expect(res.status).toBe(500);
+    expect(await leftovers(id)).toEqual({ cards: 0, audits: 0 });
+    expect(uploads.map((u) => u.path)).toHaveLength(1);
+    expect(removed.flatMap((r) => r.paths)).toEqual(uploads.map((u) => u.path)); // dọn file đã lên
+  });
+
+  it("bucket chưa tạo (503 STORAGE_BUCKET_MISSING) ngay ảnh đầu → báo lỗi cấu hình; không có thẻ, không có audit, không file", async () => {
+    const id = await fresh("231230896");
+    scenario("231230896", 96);
+    uploadFailAt = 0;
+    const { HttpError } = await import("../../src/http/errors");
+    uploadError = () => new HttpError(503, "STORAGE_BUCKET_MISSING", "Kho lưu ảnh chưa được cấu hình. Vui lòng báo quản trị viên.");
+    const res = await submit("231230896");
+    expect(res.status).toBe(503);
+    expect((await readJson(res)).error.code).toBe("STORAGE_BUCKET_MISSING");
+    expect(await leftovers(id)).toEqual({ cards: 0, audits: 0 });
+    expect(uploads).toHaveLength(0);
+    uploadError = () => new Error("Upload thất bại (500)");
   });
 });
 
