@@ -1,6 +1,11 @@
 import Link from "next/link";
+import { AreaNav } from "./area-nav";
 import { LogoutButton } from "./logout-button";
 
+/**
+ * Khung khu SV/GV/Admin. Header luôn MỘT hàng: tên app (+ tên khu từ sm) · menu (hamburger trên màn hẹp) · đăng xuất
+ * (chỉ icon trên màn hẹp, vẫn có nhãn cho trình đọc màn hình).
+ */
 export function AreaShell({
   title,
   nav,
@@ -15,18 +20,12 @@ export function AreaShell({
 }) {
   return (
     <div className="min-h-dvh">
-      <header className="border-b border-border bg-background">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-4 px-4 py-3">
-          <Link href="/" className="font-semibold">
-            Điểm danh UTC <span className="text-muted-foreground">· {title}</span>
+      <header className="relative border-b border-border bg-background">
+        <div className="mx-auto flex max-w-6xl flex-nowrap items-center gap-2 px-4 py-2 sm:gap-4 sm:py-3">
+          <Link href="/" className="min-w-0 truncate font-semibold">
+            Điểm danh UTC <span className="text-muted-foreground max-sm:hidden">· {title}</span>
           </Link>
-          <nav className="flex flex-1 flex-wrap gap-1 text-sm">
-            {nav.map((n) => (
-              <Link key={n.href} href={n.href} className="rounded-md px-3 py-1.5 hover:bg-muted">
-                {n.label}
-              </Link>
-            ))}
-          </nav>
+          <AreaNav nav={nav} />
           <LogoutButton to={logoutTo} />
         </div>
       </header>
