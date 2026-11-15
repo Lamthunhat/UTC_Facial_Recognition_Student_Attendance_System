@@ -13,6 +13,7 @@ import { api, ApiError } from "@/lib/api";
 import { cardErrorAdvice, type CardAdvice } from "@/lib/student/card-errors";
 import { cardFlow, initialCardFlow, type Notice } from "@/lib/student/card-flow";
 import { isChallenge } from "@/lib/student/challenge";
+import { loadFaceLandmarker } from "@/lib/student/face-landmarker";
 import { requestFits } from "@/lib/student/image";
 
 /**
@@ -72,6 +73,11 @@ export function CardRegistration({ onFinished }: { onFinished: () => void }) {
   // Xem trước ảnh thẻ bằng blob: URL — thu hồi khi rời bước
   const previewUrl = useMemo(() => (s.step === "card-preview" ? URL.createObjectURL(s.card) : null), [s]);
   useEffect(() => () => void (previewUrl && URL.revokeObjectURL(previewUrl)), [previewUrl]);
+
+  // Tải sẵn bộ hướng dẫn khuôn mặt (MediaPipe) khi SV đang đọc màn giới thiệu — lỗi thì FaceChallenge tự dùng đếm ngược
+  useEffect(() => {
+    if (s.step === "face-intro") void loadFaceLandmarker();
+  }, [s.step]);
 
   function follow(advice: CardAdvice) {
     if (advice.action === "consent") router.push(`/sv/dong-y?next=${encodeURIComponent(HERE)}`);

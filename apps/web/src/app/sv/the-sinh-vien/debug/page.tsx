@@ -5,6 +5,7 @@ import { useCamera } from "@/components/camera/use-camera";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/input";
 import { cardCropVerdict, cardGuideRect, guideCrop } from "@/lib/student/image";
+import { faceLandmarkerInitMs, loadFaceLandmarker } from "@/lib/student/face-landmarker";
 import { imageCaptureSupported, takePhotoBitmap } from "@/lib/student/image-browser";
 import { detectInAppBrowser } from "@/lib/student/webview";
 
@@ -20,6 +21,19 @@ export default function CameraDebugPage() {
   const [env, setEnv] = useState<Row[]>([]);
   const [cam, setCam] = useState<Row[]>([]);
   const [photo, setPhoto] = useState<string | null>(null);
+  const [face, setFace] = useState<string | null>(null);
+
+  /** Đo bộ hướng dẫn khuôn mặt: thời gian khởi tạo + dung lượng tải (Resource Timing của /mediapipe/). */
+  async function testFaceModel() {
+    setFace("Đang tải bộ hướng dẫn khuôn mặt…");
+    const lm = await loadFaceLandmarker();
+    if (!lm) return setFace("Không tải được bộ hướng dẫn — sẽ dùng đếm ngược.");
+    const res = performance.getEntriesByType("resource").filter((r) => r.name.includes("/mediapipe/")) as PerformanceResourceTiming[];
+    const mb = (n: number) => (n / 1e6).toFixed(1);
+    const transfer = res.reduce((a, r) => a + (r.transferSize || 0), 0);
+    const body = res.reduce((a, r) => a + (r.decodedBodySize || 0), 0);
+    setFace(`Khởi tạo ${faceLandmarkerInitMs() ?? "?"} ms · tải ${mb(transfer)} MB qua mạng (${mb(body)} MB sau giải nén, ${res.length} file)`);
+  }
 
   useEffect(() => {
     document.title = "Chẩn đoán camera";
@@ -99,6 +113,10 @@ export default function CameraDebugPage() {
       </div>
       {cam.length > 0 && table(cam)}
       {photo && <p className="text-sm">{photo}</p>}
+      <Button variant="outline" onClick={() => void testFaceModel()}>
+        Thử bộ hướng dẫn khuôn mặt (MediaPipe)
+      </Button>
+      {face && <p className="text-sm">{face}</p>}
     </section>
   );
 }
