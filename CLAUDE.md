@@ -29,13 +29,13 @@
 | 4 US6 thẻ SV | 12/12 | Backend trên `main` (PR #1); UI T062/T063 trên nhánh `001-us6-ui` (PR #2) |
 | 5–11 (US2, US3, US5, US4, US9, US8, US7) | 0 | |
 | 12 Polish | 0/14 | Có T144 (Turnstile) |
-- Test (lần chạy gần nhất): backend **438**, database **51**, shared **22**, web **57** (`apps/web/tests/unit`, vitest) — tổng 568, đều pass. `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm check:traces` pass.
+- Test (lần chạy gần nhất): backend **444**, database **51**, shared **22**, web **58** (`apps/web/tests/unit`, vitest) — tổng 575, đều pass. `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm check:traces` pass.
 
 ### 4. Quyết định đã chốt
 - Body request ≤ **4 MB** (giới hạn 4,5 MB của Vercel): danh sách lớp 4 MB, ảnh thẻ 1 MB, mỗi khung mặt 1 MB (FR-090, FR-100, research R14).
 - `writeAudit(..., tx)` ghi **trong cùng transaction** với thay đổi; audit lỗi → thay đổi bị huỷ (Constitution III).
 - Đăng nhập SV bằng mã: mọi lý do thất bại → cùng **401 `LOGIN_FAILED`** (FR-083). Rate limit: theo IP **chỉ đếm thất bại 50/5 phút** + trần tổng 300/5 phút (đầy thì chặn mọi lượt từ IP trước khi tra cứu); theo mã chỉ đếm thất bại 5/5 phút; **API đã đăng nhập khoá theo tài khoản**, không theo IP (FR-081, R14). `security_events` lưu HMAC mã SV bằng khoá riêng **`LOG_HMAC_SECRET`** (bắt buộc, ≥ 32 ký tự; `src/security/log-hmac.ts`), độc lập `JWT_SECRET`.
-- Đăng ký thẻ (FR-045…049, FR-045a): mã vạch, OCR dự phòng; họ tên OCR so bằng `namesMatch` (bắt buộc khớp chỉ khi mã đọc bằng OCR) + **mặt trực tiếp 3 khung có thử thách quay đầu**; **6 lượt/giờ**, lỗi kèm `remainingAttempts`.
+- Đăng ký thẻ (FR-045…049, FR-045a): mã vạch, OCR dự phòng; họ tên OCR so bằng `namesMatch` (bắt buộc khớp chỉ khi mã đọc bằng OCR) + **mặt trực tiếp 3 khung có thử thách quay đầu**; **6 lượt/giờ** — **hoàn lượt** khi 503 đã phân loại (`STORAGE_BUCKET_MISSING`, `STORAGE_UNAVAILABLE` = Storage 5xx, `OCR_UNAVAILABLE`), không hoàn với 500 không phân loại; **trần tổng 20 lượt/giờ** tính cả lượt được hoàn (`card-total:<id>`); lỗi kèm `remainingAttempts` = min(6 − lượt, 20 − tổng).
 - Ngưỡng mặc định **chờ hiệu chỉnh T011**: `DUPLICATE_ABOVE` 0,45 · `CARD_ACCEPT_ABOVE` 0,5 (mặt trực tiếp ↔ thẻ) · chân dung tối thiểu 40 px, độ nét 0,02 (R1, R3).
 - Ảnh thẻ + chân dung **chỉ upload sau khi qua hết kiểm tra**; thẻ bị từ chối không lưu file/DB; khung mặt trực tiếp không bao giờ lưu (FR-051).
 - Trùng mặt SV chung lớp / mặt trực tiếp lệch thẻ / tên lệch → **`pending_review` cho giảng viên, không từ chối tự động** (Constitution III); SV không được biết lý do.
