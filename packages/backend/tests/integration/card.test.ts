@@ -77,8 +77,13 @@ const kpsFor = (pose: "left" | "right" | "center"): [number, number][] => {
 };
 const liveFace = (pose: "left" | "right" | "center"): PortraitFace => ({ ...goodFaceBase, kps: kpsFor(pose) });
 
+/** Giả lập decode ném lỗi (vd. 503 OCR_UNAVAILABLE); null = bình thường. */
+let decodeError: (() => Error) | null = null;
 const fakeDeps: CardDeps = {
-  decode: async () => nextDecode,
+  decode: async () => {
+    if (decodeError) throw decodeError();
+    return nextDecode;
+  },
   analyzeFaces: async () => ({
     faces: nextFaces,
     embed: async () => nextEmbedding,
@@ -213,6 +218,8 @@ afterAll(async () => {
 });
 beforeEach(async () => {
   uploadFailAt = null;
+  decodeError = null;
+  uploadError = () => new Error("Upload thất bại (500)"); // đặt lại mỗi ca — ca trước lỗi giữa chừng không rò sang
   uploads.length = 0;
   removed.length = 0;
   await q(`delete from rate_limits`); // mỗi ca độc lập; ca kiểm rate limit tự làm trong một `it`
@@ -327,6 +334,87 @@ describe("upload ảnh lỗi → không còn dòng DB / audit / file dở dang",
     expect(await leftovers(id)).toEqual({ cards: 0, audits: 0 });
     expect(uploads).toHaveLength(0);
     uploadError = () => new Error("Upload thất bại (500)");
+  });
+});
+
+describe("hoàn lượt khi lỗi phía server đã phân loại; trần tổng 20 lượt/giờ (kể cả lượt được hoàn)", () => {
+  let seq = 880;
+  const fresh = async () => {
+    const code = `2312308${seq++}`;
+    const id = (await q<{ id: string }>(`insert into students (student_code,last_name,first_name) values ($1,'Thử','Hoàn') returning id`, [code]))[0].id;
+    await q(`insert into enrollments (class_id, student_id) values ($1,$2)`, [ids.K1, id]);
+    ids[code] = id;
+    cookie[code] = `${SESSION_COOKIE}=${(await createSession(id, "student")).token}`;
+    await consent(code);
+    scenario(code, seq);
+    return { code, id };
+  };
+  const counter = async (key: string) => Number((await q<{ count: number }>(`select count from rate_limits where key=$1`, [key]))[0]?.count ?? 0);
+  const httpErr = async (status: number, code: string) => {
+    const { HttpError } = await import("../../src/http/errors");
+    return () => new HttpError(status, code, "lỗi thử");
+  };
+
+  for (const [label, setup] of [
+    ["kho ảnh thiếu bucket (503 STORAGE_BUCKET_MISSING)", async () => {
+      uploadFailAt = 0;
+      uploadError = await httpErr(503, "STORAGE_BUCKET_MISSING");
+    }],
+    ["Storage trả 5xx (503 STORAGE_UNAVAILABLE)", async () => {
+      uploadFailAt = 1; // ảnh thẻ đã lên, chân dung lỗi
+      uploadError = await httpErr(503, "STORAGE_UNAVAILABLE");
+    }],
+    ["OCR không nạp được (503 OCR_UNAVAILABLE)", async () => {
+      decodeError = await httpErr(503, "OCR_UNAVAILABLE");
+    }],
+  ] as const) {
+    it(`${label} → HOÀN lượt: remainingAttempts vẫn 6; bộ đếm 6/giờ về 0, trần tổng vẫn tính 1`, async () => {
+      const { code, id } = await fresh();
+      await setup();
+      const res = await submit(code);
+      expect(res.status).toBe(503);
+      expect((await readJson(res)).error.remainingAttempts).toBe(6);
+      expect(await counter(`card:${id}`)).toBe(0);
+      expect(await counter(`card-total:${id}`)).toBe(1);
+      uploadError = () => new Error("Upload thất bại (500)");
+    });
+  }
+
+  it("lỗi 500 không phân loại (unhandled) → KHÔNG hoàn: lượt sau còn 4", async () => {
+    const { code, id } = await fresh();
+    uploadFailAt = 0; // uploadError mặc định: Error thường → 500
+    const res = await submit(code);
+    expect(res.status).toBe(500);
+    expect(JSON.stringify(await readJson(res))).not.toMatch(/remainingAttempts/);
+    expect(await counter(`card:${id}`)).toBe(1);
+    uploadFailAt = null;
+    nextDecode = { decoded: null, text: "" }; // lượt 2: UNREADABLE (lỗi của ảnh, có tính lượt)
+    const second = await readJson(await submit(code));
+    expect(second.error).toMatchObject({ code: "UNREADABLE", remainingAttempts: 4 });
+  });
+
+  it("trần tổng 20 lượt/giờ tính cả lượt được hoàn: đã 19 lượt → lượt 20 được xử lý (còn 0), lượt 21 → 429 dù bộ đếm 6/giờ = 0", async () => {
+    const { code, id } = await fresh();
+    await q(`insert into rate_limits (key, count, window_start) values ($1, 19, now())`, [`card-total:${id}`]);
+    uploadFailAt = 0;
+    uploadError = await httpErr(503, "STORAGE_BUCKET_MISSING");
+    const twentieth = await submit(code);
+    expect(twentieth.status).toBe(503);
+    expect((await readJson(twentieth)).error.remainingAttempts).toBe(0);
+    expect(await counter(`card:${id}`)).toBe(0);
+    const blocked = await submit(code);
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get("Retry-After")).toBeTruthy();
+    expect((await readJson(blocked)).error.remainingAttempts).toBe(0);
+    uploadError = () => new Error("Upload thất bại (500)");
+  });
+
+  it("lỗi của ảnh (422) vẫn tính lượt như cũ: remainingAttempts = min(6 − lượt, 20 − tổng)", async () => {
+    const { code, id } = await fresh();
+    await q(`insert into rate_limits (key, count, window_start) values ($1, 17, now())`, [`card-total:${id}`]);
+    nextDecode = { decoded: null, text: "" };
+    const r = await readJson(await submit(code));
+    expect(r.error).toMatchObject({ code: "UNREADABLE", remainingAttempts: 2 }); // min(6−1, 20−18)
   });
 });
 

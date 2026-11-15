@@ -41,7 +41,9 @@ describe("lỗi Supabase Storage", () => {
 
   it("lỗi khác → log storage_request_failed với status, statusCode, error, message, bucket, host; ném lỗi máy chủ", async () => {
     respond(413, { statusCode: "413", error: "Payload too large", message: "The object exceeded the maximum allowed size" });
-    await expect(uploadObject("cards", "sv/1/card.jpg", Buffer.from("x"), "image/jpeg")).rejects.toThrow(/413/);
+    const err = await uploadObject("cards", "sv/1/card.jpg", Buffer.from("x"), "image/jpeg").catch((e) => e);
+    expect(String(err.message)).toMatch(/413/);
+    expect(err.code).toBeUndefined(); // 4xx khác "Bucket not found" = lỗi lập trình → 500 không phân loại (không hoàn lượt)
     const log = errors.map((l) => JSON.parse(l)).find((l) => l.msg === "storage_request_failed");
     expect(log).toMatchObject({
       op: "upload",
@@ -57,7 +59,8 @@ describe("lỗi Supabase Storage", () => {
 
   it("body lỗi không phải JSON → vẫn log status + đoạn đầu body (cắt ngắn)", async () => {
     respond(502, `<html>${"x".repeat(1000)}</html>`);
-    await expect(uploadObject("evidence", "a/b.jpg", Buffer.from("x"), "image/jpeg")).rejects.toThrow();
+    // Supabase 5xx = lỗi phía server đã phân loại (lượt đăng ký thẻ được hoàn)
+    await expect(uploadObject("evidence", "a/b.jpg", Buffer.from("x"), "image/jpeg")).rejects.toMatchObject({ status: 503, code: "STORAGE_UNAVAILABLE" });
     const log = errors.map((l) => JSON.parse(l)).find((l) => l.msg === "storage_request_failed");
     expect(log.status).toBe(502);
     expect(String(log.message).length).toBeLessThanOrEqual(300);

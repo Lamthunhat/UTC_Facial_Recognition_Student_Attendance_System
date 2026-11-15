@@ -62,6 +62,13 @@ describe("cardErrorAdvice", () => {
     expect(a.message).toMatch(/quản trị viên/);
   });
 
+  it("kho ảnh tạm không phản hồi (503 STORAGE_UNAVAILABLE) → thử lại sau, kèm số lượt (lượt đã được hoàn)", () => {
+    const a = cardErrorAdvice({ status: 503, code: "STORAGE_UNAVAILABLE", remainingAttempts: 6 });
+    expect(a.message).toMatch(/tạm thời/);
+    expect(a.message).not.toMatch(/mã 503/);
+    expect(a.attemptsNote).toBe("Bạn còn 6 lượt thử trong giờ này.");
+  });
+
   it("OCR tạm không dùng được (503 OCR_UNAVAILABLE) → thông báo riêng", () => {
     expect(cardErrorAdvice({ status: 503, code: "OCR_UNAVAILABLE" }).message).toMatch(/tạm thời/);
   });

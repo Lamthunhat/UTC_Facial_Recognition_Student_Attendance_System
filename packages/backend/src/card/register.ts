@@ -12,7 +12,7 @@ import { cosine } from "../face/similarity";
 import { HttpError, tooManyRequests } from "../http/errors";
 import { log } from "../log";
 import { consumeNonce, issueNonce } from "../security/nonce";
-import { enforce, hit, RULES } from "../security/rate-limit";
+import { enforce, hit, refund, RULES } from "../security/rate-limit";
 import { sanitizeImage, UploadError } from "../security/upload";
 import { requireConsent } from "../student/consent";
 import { decodeCard, type DecodeStats } from "./decode";
@@ -127,6 +127,9 @@ function uploadErrorToHttp(e: UploadError) {
     : new HttpError(422, e.code, e.code === "UNSUPPORTED_TYPE" ? "Ảnh không đúng định dạng (chỉ nhận JPEG/PNG/WebP/HEIC)." : "Không đọc được ảnh. Vui lòng chụp lại.");
 }
 
+/** Lỗi phía server đã phân loại — lượt đăng ký thẻ được hoàn (lỗi 500 không phân loại thì không). */
+const REFUNDABLE_CODES = new Set(["STORAGE_BUCKET_MISSING", "STORAGE_UNAVAILABLE", "OCR_UNAVAILABLE"]);
+
 export async function registerCard(
   session: SessionClaims,
   input: { nonce: string; image: Buffer; frames: Buffer[] },
@@ -136,17 +139,28 @@ export async function registerCard(
   await assertCanRegisterCard(studentId);
   const { challenge } = await consumeNonce({ nonce: input.nonce, studentId, purpose: "card", ip });
   if (!isChallenge(challenge)) throw new HttpError(403, "BAD_NONCE", "Phiên chụp không hợp lệ. Vui lòng chụp lại.");
-  // Tính lượt (6/giờ/SV) — chỉ lượt đã qua nonce hợp lệ. Lỗi từ đây trở đi kèm remainingAttempts để UI báo số lượt còn lại.
-  const attempt = await hit(`card:${studentId}`, RULES.cardRegister);
-  const remainingAttempts = Math.max(0, RULES.cardRegister.limit - attempt.count);
+  // Tính lượt — chỉ lượt đã qua nonce hợp lệ. Lỗi từ đây trở đi kèm remainingAttempts để UI báo số lượt còn lại.
+  // 6 lượt/giờ (lượt lỗi phía server đã phân loại được hoàn) + trần tổng 20 lượt/giờ (không bao giờ hoàn).
+  const attemptKey = `card:${studentId}`;
+  const attempt = await hit(attemptKey, RULES.cardRegister);
   if (!attempt.allowed) throw tooManyRequests(attempt.retryAfterSec, { remainingAttempts: 0 });
+  const total = await hit(`card-total:${studentId}`, RULES.cardRegisterTotal);
+  if (!total.allowed) throw tooManyRequests(total.retryAfterSec, { remainingAttempts: 0 });
+  const remaining = (attemptsUsed: number) =>
+    Math.max(0, Math.min(RULES.cardRegister.limit - attemptsUsed, RULES.cardRegisterTotal.limit - total.count));
+  const remainingAttempts = remaining(attempt.count);
   // Thời gian từng bước — chỉ log ở dev (đo hiệu năng cục bộ; production không ghi)
   const timer: ReturnType<typeof stepTimer> & { decodeStats?: DecodeStats } = stepTimer();
   try {
     return await processCard(session, studentId, input, challenge, timer);
   } catch (e) {
+    // Lỗi phía server ĐÃ PHÂN LOẠI (không phải lỗi của ảnh/SV) → hoàn lượt 6/giờ; trần tổng vẫn tính.
+    if (e instanceof HttpError && REFUNDABLE_CODES.has(e.code)) {
+      await refund(attemptKey);
+      throw e.withExtra({ remainingAttempts: remaining(attempt.count - 1) });
+    }
     if (e instanceof HttpError && e.status < 500) throw e.withExtra({ remainingAttempts });
-    throw e;
+    throw e; // lỗi không phân loại (500): không hoàn, không kèm remainingAttempts
   } finally {
     if (process.env.NODE_ENV === "development") log.info("card_register_timing", { ms: timer.done(), decode: timer.decodeStats });
   }

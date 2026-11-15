@@ -73,6 +73,8 @@ async function storageFailure(res: Response, op: "upload" | "sign" | "remove", b
     throw new HttpError(503, "STORAGE_BUCKET_MISSING", "Kho lưu ảnh chưa được cấu hình. Vui lòng báo quản trị viên.");
   }
   log.error("storage_request_failed", info);
+  // Supabase lỗi phía server (5xx) → lỗi đã phân loại (lượt đăng ký thẻ được hoàn); 4xx khác = lỗi lập trình → 500
+  if (res.status >= 500) throw new HttpError(503, "STORAGE_UNAVAILABLE", "Kho lưu ảnh tạm thời không phản hồi. Vui lòng thử lại sau ít phút.");
   const label = op === "upload" ? "Upload" : op === "sign" ? "Tạo signed URL" : "Xoá file";
   throw new Error(`${label} thất bại (${res.status})`);
 }
