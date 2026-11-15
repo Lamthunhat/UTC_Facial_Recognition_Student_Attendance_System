@@ -72,7 +72,32 @@ function extractEntries(zip: Buffer, names: string[]): Map<string, Buffer> {
   return out;
 }
 
+/**
+ * MediaPipe Face Landmarker (float16) cho hướng dẫn quay đầu ở TRÌNH DUYỆT (chỉ hướng dẫn — server vẫn quyết định).
+ * Tự host trong apps/web/public/mediapipe/ (không CDN, đúng CSP connect-src 'self'). Giấy phép Apache-2.0.
+ */
+const FACE_LANDMARKER_URL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+const FACE_LANDMARKER_SHA256 = "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff";
+const PUBLIC_MEDIAPIPE = path.resolve(__dirname, "../apps/web/public/mediapipe");
+
+async function downloadFaceLandmarker() {
+  const dest = path.join(PUBLIC_MEDIAPIPE, "face_landmarker.task");
+  const have = await readFile(dest).then(sha256, () => null);
+  if (have === FACE_LANDMARKER_SHA256) {
+    console.log("✔ face_landmarker.task đã có");
+    return;
+  }
+  const res = await fetch(FACE_LANDMARKER_URL);
+  if (!res.ok) throw new Error(`Tải face_landmarker.task thất bại: HTTP ${res.status}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (sha256(buf) !== FACE_LANDMARKER_SHA256) throw new Error("Mã băm face_landmarker.task không khớp — dừng lại");
+  await mkdir(PUBLIC_MEDIAPIPE, { recursive: true });
+  await writeFile(dest, buf);
+  console.log(`✔ face_landmarker.task (${(buf.length / 1e6).toFixed(1)} MB)`);
+}
+
 async function main() {
+  await downloadFaceLandmarker();
   if (await alreadyPresent()) {
     console.log(`✔ Model đã có trong ${OUT_DIR}`);
     return;

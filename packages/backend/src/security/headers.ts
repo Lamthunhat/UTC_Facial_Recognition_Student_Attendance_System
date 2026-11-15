@@ -12,8 +12,9 @@ export function buildCsp({ nonce, dev = false, storageOrigin }: CspOptions): str
   const img = ["'self'", "blob:", "data:", storageOrigin].filter(Boolean).join(" ");
   const directives: Record<string, string> = {
     "default-src": "'self'",
-    // strict-dynamic: chỉ script có nonce (và script do chúng nạp) được chạy
-    "script-src": `'self' 'nonce-${nonce}' 'strict-dynamic'${dev ? " 'unsafe-eval'" : ""}`,
+    // strict-dynamic: chỉ script có nonce (và script do chúng nạp) được chạy.
+    // 'wasm-unsafe-eval': CHỈ cho biên dịch WebAssembly (MediaPipe Face Landmarker tự host ở /mediapipe) — không mở eval JS.
+    "script-src": `'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval'${dev ? " 'unsafe-eval'" : ""}`,
     "style-src": `'self' 'unsafe-inline'`,
     "img-src": img,
     "font-src": "'self'",

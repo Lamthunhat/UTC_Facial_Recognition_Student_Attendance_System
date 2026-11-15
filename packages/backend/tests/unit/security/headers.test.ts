@@ -5,7 +5,14 @@ describe("CSP (T028, FR-086)", () => {
   const csp = buildCsp({ nonce: "abc123", storageOrigin: "https://x.supabase.co" });
   it("chỉ cho script có nonce, không unsafe-inline/eval cho script", () => {
     expect(csp).toContain("script-src 'self' 'nonce-abc123' 'strict-dynamic'");
-    expect(csp).not.toMatch(/script-src[^;]*unsafe-(inline|eval)/);
+    // 'unsafe-eval' (eval JS) và 'unsafe-inline' bị cấm; 'wasm-unsafe-eval' CHỈ cho biên dịch WebAssembly
+    expect(csp).not.toMatch(/script-src[^;]*'unsafe-(inline|eval)'/);
+  });
+  it("cho biên dịch WebAssembly ở trình duyệt ('wasm-unsafe-eval') — MediaPipe Face Landmarker tự host", () => {
+    expect(csp).toMatch(/script-src [^;]*'wasm-unsafe-eval'/);
+    // wasm + model tải từ chính origin (public/mediapipe) — không mở thêm nguồn ngoài
+    expect(csp).toContain("connect-src 'self'");
+    expect(csp).not.toMatch(/https:\/\/(cdn|storage\.googleapis)/);
   });
   it("chặn nhúng iframe, object, đổi base", () => {
     expect(csp).toContain("frame-ancestors 'none'");

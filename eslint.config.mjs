@@ -19,6 +19,9 @@ const eslintConfig = [
       "**/build/**",
       "**/next-env.d.ts",
       "**/models/**",
+      // Tài nguyên chép/tải lúc build (vendor, không phải mã nguồn): scripts/card-assets.mjs, models:download
+      "**/public/mediapipe/**",
+      "**/card-assets/**",
       ".specify/**",
       "specs/**",
       "_claude/**",

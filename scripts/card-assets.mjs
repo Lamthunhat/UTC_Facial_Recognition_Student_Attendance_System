@@ -27,6 +27,18 @@ export const CARD_ASSETS = [
   },
 ];
 
+/**
+ * Wasm MediaPipe tasks-vision 1.2.0 cho trình duyệt (hướng dẫn quay đầu) — tự host trong public/mediapipe/wasm
+ * (không CDN). Trình duyệt chỉ tải 1 cặp: bản SIMD hoặc bản nosimd tuỳ máy.
+ */
+const mp = (file) => (req) => path.join(path.dirname(req.resolve("@mediapipe/tasks-vision")), "wasm", file);
+export const PUBLIC_ASSETS = [
+  { name: "vision_wasm_internal.js", source: mp("vision_wasm_internal.js"), sha256: "85c1a342be70427987f900969a5f26e17557351111364e6585e97fb03e93e108" },
+  { name: "vision_wasm_internal.wasm", source: mp("vision_wasm_internal.wasm"), sha256: "bcc13df22d3d69ec8cbe8e280989356d844ae00f4523eb82072d2484f44134dc" },
+  { name: "vision_wasm_nosimd_internal.js", source: mp("vision_wasm_nosimd_internal.js"), sha256: "e9b2b799e0f1078f5538b300a57835b823742c37e2646308a03f0f25b39fdcdc" },
+  { name: "vision_wasm_nosimd_internal.wasm", source: mp("vision_wasm_nosimd_internal.wasm"), sha256: "ed5e5e5812490bd90d6a440290845ff9e4c516f696847a28a0c0e0573470d469" },
+];
+
 const sha256 = (buf) => createHash("sha256").update(buf).digest("hex");
 
 /** Chép + kiểm. Trả danh sách {name, path}. Nguồn sai sha256 → lỗi, không chép gì của file đó. */
@@ -54,7 +66,11 @@ export async function prepareCardAssets({ appDir, outDir = path.join(appDir, "ca
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../apps/web");
   prepareCardAssets({ appDir })
-    .then((r) => console.log(`card-assets: ${r.map((x) => x.name).join(", ")} (sha256 đã kiểm)`))
+    .then(async (r) => {
+      console.log(`card-assets: ${r.map((x) => x.name).join(", ")} (sha256 đã kiểm)`);
+      const p = await prepareCardAssets({ appDir, outDir: path.join(appDir, "public/mediapipe/wasm"), assets: PUBLIC_ASSETS });
+      console.log(`public/mediapipe/wasm: ${p.length} file (sha256 đã kiểm)`);
+    })
     .catch((e) => {
       console.error(String(e?.message ?? e));
       process.exit(1);
