@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
 import { log } from "../log";
+import { ensureFontconfig } from "./fontconfig";
 
 /**
  * T073 — Đóng dấu ảnh bằng chứng (FR-039, FR-010d, Constitution I): giờ SERVER (giờ VN), địa chỉ ước tính từ vị trí
@@ -67,6 +68,7 @@ export async function stampEvidence(jpeg: Buffer, info: StampInfo): Promise<Buff
   const fontPx = Math.max(11, Math.round(W / 34));
   const pad = Math.round(fontPx * 0.6);
   const fontfile = evidenceFontPath();
+  if (fontfile) ensureFontconfig(path.dirname(fontfile)); // trước lần vẽ chữ đầu tiên (fontconfig.ts)
   const markup = `<span foreground="white">${stampLines(info).map(escapePango).join("\n")}</span>`;
   let text = await sharp({
     text: { text: markup, font: `${FONT_FAMILY} ${fontPx}`, ...(fontfile ? { fontfile } : {}), width: W - 2 * pad, rgba: true, dpi: 72, wrap: "char" },

@@ -1,5 +1,10 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
+import { ensureFontconfig } from "./src/evidence/fontconfig";
+
+// Vẽ chữ lên ảnh bằng chứng (sharp/Pango): cấu hình fontconfig không cache, đặt TRƯỚC khi tạo worker để mọi tiến trình
+// test thừa hưởng (trên Windows đặt biến bên trong worker không có hiệu lực) — xem src/evidence/fontconfig.ts.
+ensureFontconfig(fileURLToPath(new URL("../../apps/web/public/fonts", import.meta.url)));
 
 export default defineConfig({
   resolve: {
