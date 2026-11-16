@@ -7,7 +7,7 @@ import { vnDateOf } from "@utc/shared/periods";
 import { writeAudit } from "../audit";
 import type { SessionClaims } from "../auth/jwt";
 import { removeObjects, signedUrl, uploadObject, type Bucket } from "../evidence/storage";
-import { checkLiveFrames, isChallenge, LIVENESS_RULES, samePerson, type Challenge, type LiveFrameError } from "../face/liveness";
+import { isChallenge, type Challenge, type LiveFrameError } from "../face/liveness";
 import { cosine } from "../face/similarity";
 import { parseClientYaw, yawDebugEnabled, yawDebugReport, type YawDebugReport } from "../face/yaw-debug";
 import { HttpError, tooManyRequests } from "../http/errors";
@@ -15,6 +15,7 @@ import { log } from "../log";
 import { consumeNonce, issueNonce } from "../security/nonce";
 import { enforce, hit, refund, RULES } from "../security/rate-limit";
 import { sanitizeImage, UploadError } from "../security/upload";
+import { ALLOWED_IMAGE_TYPES, evaluateLiveFrames, sanitizeLiveFrames, uploadErrorToHttp } from "./live";
 import { requireConsent } from "../student/consent";
 import { decodeCard, type DecodeStats } from "./decode";
 import { stepTimer } from "./step-timer";
@@ -66,8 +67,7 @@ export function resetCardDepsForTest() {
 export const cardDeps = () => deps;
 
 export const CARD_IMAGE_MAX_BYTES = 1024 * 1024; // FR-090: ảnh thẻ ≤ 1 MB
-export const LIVE_FRAME_MAX_BYTES = 1024 * 1024; // FR-090: mỗi khung mặt trực tiếp ≤ 1 MB
-export const LIVE_FRAME_COUNT = 3;
+export { LIVE_FRAME_COUNT, LIVE_FRAME_MAX_BYTES } from "./live";
 
 const threshold = (name: string, fallback: number) => {
   const v = Number(process.env[name] ?? fallback);
@@ -123,12 +123,6 @@ export async function issueCardNonce(session: SessionClaims) {
   return { nonce: n.nonce, expiresAt: n.expiresAt, challenge, ...(yawDebugEnabled() ? { yawDebug: true as const } : {}) };
 }
 
-function uploadErrorToHttp(e: UploadError) {
-  return e.code === "FILE_TOO_LARGE"
-    ? new HttpError(413, "PAYLOAD_TOO_LARGE", "Ảnh vượt quá 1 MB.")
-    : new HttpError(422, e.code, e.code === "UNSUPPORTED_TYPE" ? "Ảnh không đúng định dạng (chỉ nhận JPEG/PNG/WebP/HEIC)." : "Không đọc được ảnh. Vui lòng chụp lại.");
-}
-
 /** Lỗi phía server đã phân loại — lượt đăng ký thẻ được hoàn (lỗi 500 không phân loại thì không). */
 const REFUNDABLE_CODES = new Set(["STORAGE_BUCKET_MISSING", "STORAGE_UNAVAILABLE", "OCR_UNAVAILABLE"]);
 
@@ -178,22 +172,14 @@ async function processCard(
   challenge: Challenge,
   timer: ReturnType<typeof stepTimer> & { decodeStats?: DecodeStats },
 ): Promise<CardResult> {
-  if (input.frames.length !== LIVE_FRAME_COUNT) {
-    throw new HttpError(422, "VALIDATION_ERROR", "Cần đúng 3 khung hình khuôn mặt theo hướng dẫn.");
-  }
-
-  const allowed: ("image/jpeg" | "image/png" | "image/webp" | "image/heic")[] = ["image/jpeg", "image/png", "image/webp", "image/heic"];
   let jpeg: Buffer;
-  let frames: Buffer[];
   try {
-    jpeg = (await sanitizeImage(input.image, { maxBytes: CARD_IMAGE_MAX_BYTES, allowed, maxSide: 2048, quality: 90 })).buffer;
-    frames = await Promise.all(
-      input.frames.map(async (f) => (await sanitizeImage(f, { maxBytes: LIVE_FRAME_MAX_BYTES, allowed, maxSide: 1280, quality: 85 })).buffer),
-    );
+    jpeg = (await sanitizeImage(input.image, { maxBytes: CARD_IMAGE_MAX_BYTES, allowed: ALLOWED_IMAGE_TYPES, maxSide: 2048, quality: 90 })).buffer;
   } catch (e) {
     if (e instanceof UploadError) throw uploadErrorToHttp(e);
     throw e;
   }
+  const frames = await sanitizeLiveFrames(input.frames);
 
   timer.mark("sanitize");
   const db = await getDb();
@@ -212,19 +198,14 @@ async function processCard(
   if (!verdict.ok) throw new HttpError(422, verdict.error, REJECT_MESSAGES[verdict.error]);
 
   // Liveness (FR-045a): 3 khung mặt trực tiếp đúng thử thách quay đầu và cùng một người. Sai → từ chối.
-  const live = await Promise.all(frames.map((f) => deps.analyzeLive(f)));
-  const liveFaces = live.map((l) => l.faces.filter((f) => f.kps).map((f) => ({ box: f.box, kps: f.kps! })));
-  // Preview/dev: yaw server từng khung + yaw client + lý do (công cụ hiệu chỉnh). Production: undefined, không log.
+  const liveCheck = await evaluateLiveFrames(frames, challenge, deps.analyzeLive);
+  // Preview/dev: yaw server từng khung + yaw client + lý do (công cụ hiệu chỉnh). Production: không có, không log.
   const debugOn = yawDebugEnabled();
   const clientYaw = debugOn ? parseClientYaw(input.clientYaw) : null;
   const debug = (reason: Parameters<typeof yawDebugReport>[3]) =>
-    debugOn ? { yawDebug: yawDebugReport(liveFaces, challenge, clientYaw, reason) } : {};
-  const liveCheck = checkLiveFrames(liveFaces, challenge);
-  if (!liveCheck.ok) throw new HttpError(422, liveCheck.error, LIVE_MESSAGES[liveCheck.error], {}, debug(liveCheck.error));
-  const liveEmbeddings = await Promise.all(live.map((l) => l.embed(0)));
-  if (!samePerson(liveEmbeddings, liveCheck.centerIndex, LIVENESS_RULES.samePersonMin)) {
-    throw new HttpError(422, "LIVENESS_FAILED", LIVE_MESSAGES.LIVENESS_FAILED, {}, debug("SAME_PERSON_FAILED"));
-  }
+    debugOn ? { yawDebug: yawDebugReport(liveCheck.faces, challenge, clientYaw, reason) } : {};
+  if (!liveCheck.ok) throw new HttpError(422, liveCheck.error, LIVE_MESSAGES[liveCheck.error], {}, debug(liveCheck.reason));
+  const liveEmbeddings = liveCheck.embeddings;
 
   timer.mark("liveness");
   const embedding = await portraits.embed(verdict.faceIndex);
