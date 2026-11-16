@@ -1,4 +1,5 @@
-import { classifyFaceYaw, faceYaw, SERVER_YAW, type YawPose } from "@utc/shared/face-yaw";
+import { classifyFaceYaw, faceYaw, type YawPose } from "@utc/shared/face-yaw";
+import { SERVER_YAW } from "@utc/shared/face-yaw-thresholds";
 import type { Point } from "./align";
 import { cosine } from "./similarity";
 
@@ -7,13 +8,13 @@ import { cosine } from "./similarity";
  * Yaw từ 5 điểm mốc SCRFD [mắt, mắt, mũi, mép, mép] + bbox mặt, CÙNG công thức với client (@utc/shared/face-yaw):
  * kẹp(5 × (mũi.x − tâm 2 mắt.x) / bề rộng bbox, ±1) — không chia cho khoảng cách 2 mắt (→ 0 khi quay mạnh, ra -41 và
  * đổi dấu khi thử thật). Ảnh camera trước KHÔNG lật: SV quay sang TRÁI của mình → mũi lệch PHẢI ảnh → yaw > 0.
- * Ngưỡng SERVER_YAW (thẳng ≤ 0,18 · quay 0,30–0,80; > 0,80 = quay quá mạnh, KHÔNG phải khung quay hợp lệ).
+ * Ngưỡng SERVER_YAW (thẳng ≤ 0,18 · quay 0,22–0,80; > 0,80 = quay quá mạnh, KHÔNG phải khung quay hợp lệ).
  * Dùng chung cho đăng ký thẻ (FR-045a) và điểm danh (Phase 5).
  */
 export type Pose = "left" | "right" | "center";
 export type Challenge = [Exclude<Pose, "center">, Exclude<Pose, "center">];
 
-/** Ngưỡng yaw: SERVER_YAW trong @utc/shared/face-yaw. Ngưỡng khác — hiệu chỉnh cùng bộ ảnh thử (T011). */
+/** Ngưỡng yaw: SERVER_YAW trong @utc/shared/face-yaw-thresholds. Ngưỡng khác — hiệu chỉnh cùng bộ ảnh thử (T011). */
 export const LIVENESS_RULES = {
   /** Cosine tối thiểu giữa khung nhìn thẳng và mỗi khung quay đầu (cùng một người). */
   samePersonMin: 0.5,

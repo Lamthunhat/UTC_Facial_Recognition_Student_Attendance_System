@@ -1,11 +1,10 @@
 "use client";
 
-import { yawDebugRows, yawReasonText, type YawDebugReport } from "@/lib/student/yaw-debug";
+import { yawDebugRows, yawReasonText, yawThresholdsText as fmt, type YawDebugReport } from "@/lib/student/yaw-debug";
 
 /**
  * Bảng so sánh yaw client ↔ server — CHỈ hiện ở preview/dev (server chỉ trả `yawDebug` ở đó). Dùng để hiệu chỉnh ngưỡng.
  */
-const fmt = (t: YawDebugReport["thresholds"]["server"]) => `thẳng ≤ ${t.centerMax} · quay ${t.turnMin}–${t.turnMax}`;
 
 export function YawDebugTable({ report }: { report: YawDebugReport }) {
   const rows = yawDebugRows(report);

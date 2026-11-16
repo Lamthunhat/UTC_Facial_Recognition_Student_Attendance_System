@@ -1,4 +1,5 @@
-import { CLIENT_YAW, faceYaw, SERVER_YAW } from "@utc/shared/face-yaw";
+import { faceYaw } from "@utc/shared/face-yaw";
+import { CLIENT_YAW, SERVER_YAW } from "@utc/shared/face-yaw-thresholds";
 import { syntheticHead } from "@utc/shared/head-model";
 import { describe, expect, it } from "vitest";
 import { classifyYaw, CLIENT_POSE, createPoseTracker, poseGuidance, yawFromKeypoints } from "@/lib/student/face-pose";
@@ -103,7 +104,8 @@ describe("classifyYaw — trang chẩn đoán hiển thị theo cả hai bộ ng
     expect(classifyYaw(0.5, SERVER_YAW)).toBe("left");
     expect(classifyYaw(-0.5, SERVER_YAW)).toBe("right");
     expect(classifyYaw(0.9, SERVER_YAW)).toBe("too_far");
-    expect(classifyYaw(0.25, SERVER_YAW)).toBe("unclear");
+    expect(classifyYaw(0.2, SERVER_YAW)).toBe("unclear");
+    expect(classifyYaw(0.25, SERVER_YAW)).toBe("left");
     expect(classifyYaw(0.7, CLIENT_YAW)).toBe("too_far"); // client chặt hơn
     expect(classifyYaw(0.7, SERVER_YAW)).toBe("left");
   });

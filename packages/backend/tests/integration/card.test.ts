@@ -854,7 +854,7 @@ describe("công cụ so sánh yaw client ↔ server — CHỈ preview/dev; produ
     expect(d.frames.map((f: { expected: string }) => f.expected)).toEqual([lastChallenge[0], "center", lastChallenge[1]]);
     expect(d.frames.map((f: { ok: boolean }) => f.ok)).toEqual([false, true, false]);
     expect(d.frames.every((f: { serverYaw: unknown }) => typeof f.serverYaw === "number")).toBe(true);
-    expect(d.thresholds.server).toEqual({ centerMax: 0.18, turnMin: 0.3, turnMax: 0.8 });
+    expect(d.thresholds.server).toEqual({ centerMax: 0.18, turnMin: 0.22, turnMax: 0.8 });
     expect(uploads).toHaveLength(0);
   });
 

@@ -5,7 +5,9 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/input";
 import { detectPose, faceDetectorInitMs, loadFaceDetector } from "@/lib/student/face-detector";
-import { CLIENT_YAW, SERVER_YAW, YAW_SCALE, type YawThresholds } from "@utc/shared/face-yaw";
+import { YAW_SCALE } from "@utc/shared/face-yaw";
+import { CLIENT_YAW, SERVER_YAW } from "@utc/shared/face-yaw-thresholds";
+import { yawThresholdsText as fmt } from "@/lib/student/yaw-debug";
 import { classifyYaw } from "@/lib/student/face-pose";
 import { useCamera } from "./use-camera";
 
@@ -15,7 +17,6 @@ import { useCamera } from "./use-camera";
  * chỉnh ngưỡng bằng mặt thật. Không chụp, không gửi, không lưu ảnh nào.
  */
 const POSE_VI = { left: "trái", right: "phải", center: "thẳng", too_far: "QUÁ MẠNH", unclear: "chưa rõ" } as const;
-const fmt = (t: YawThresholds) => `thẳng ≤ ${t.centerMax} · quay ${t.turnMin}–${t.turnMax} · > ${t.turnMax} quá mạnh`;
 
 export function FaceProbe() {
   const { videoRef, state, start, stop } = useCamera("user", { width: 1280, height: 720 });

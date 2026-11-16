@@ -1,19 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { clientYawField, parseProbeResult, parseYawDebug, yawDebugRows, yawReasonText } from "@/lib/student/yaw-debug";
+import { CLIENT_YAW, SERVER_YAW } from "@utc/shared/face-yaw-thresholds";
+import { clientYawField, parseProbeResult, parseYawDebug, yawDebugRows, yawReasonText, yawThresholdsText } from "@/lib/student/yaw-debug";
 
 /**
  * Công cụ so sánh yaw client ↔ server (CHỈ preview/dev — server quyết định bật qua nonce `yawDebug: true`).
  * Phần thuần: đọc báo cáo server, dựng bảng so sánh, đóng gói yaw client gửi kèm khung.
  */
 const thresholds = {
-  server: { centerMax: 0.18, turnMin: 0.3, turnMax: 0.8 },
+  server: { centerMax: 0.18, turnMin: 0.22, turnMax: 0.8 },
   client: { centerMax: 0.12, turnMin: 0.4, turnMax: 0.65 },
 };
 const report = {
   thresholds,
   reason: "LIVENESS_FAILED",
   frames: [
-    { frame: 1, expected: "left", faces: 1, serverYaw: 0.261, serverPose: "unclear", clientYaw: 0.452, ok: false },
+    { frame: 1, expected: "left", faces: 1, serverYaw: 0.201, serverPose: "unclear", clientYaw: 0.452, ok: false },
     { frame: 2, expected: "center", faces: 1, serverYaw: 0.02, serverPose: "center", clientYaw: -0.01, ok: true },
     { frame: 3, expected: "right", faces: 0, serverYaw: null, serverPose: "no_face", clientYaw: null, ok: false },
   ],
@@ -35,7 +36,7 @@ describe("yawDebugRows — bảng so sánh từng khung", () => {
   it("mong đợi, yaw client/server (3 số), chênh lệch, tư thế theo ngưỡng từng bên, kết quả", () => {
     const rows = yawDebugRows(parseYawDebug(report)!);
     expect(rows).toEqual([
-      { frame: 1, expected: "trái", client: "0.452 (trái)", server: "0.261 (chưa rõ)", delta: "-0.191", ok: false },
+      { frame: 1, expected: "trái", client: "0.452 (trái)", server: "0.201 (chưa rõ)", delta: "-0.251", ok: false },
       { frame: 2, expected: "thẳng", client: "-0.010 (thẳng)", server: "0.020 (thẳng)", delta: "+0.030", ok: true },
       { frame: 3, expected: "phải", client: "—", server: "không thấy mặt", delta: "—", ok: false },
     ]);
@@ -73,5 +74,14 @@ describe("parseProbeResult — phản hồi POST /api/student/liveness-probe (tr
   });
   it.each([[null], [{ passed: "yes", yawDebug: report }], [{ passed: true }], [{ passed: true, yawDebug: { frames: [] } }]])("không hợp lệ %j → null", (v) => {
     expect(parseProbeResult(v)).toBeNull();
+  });
+});
+
+describe("yawThresholdsText — ngưỡng hiển thị ở trang chẩn đoán + bảng so sánh", () => {
+  it("server (ngưỡng mới 0,22)", () => {
+    expect(yawThresholdsText(SERVER_YAW)).toBe("thẳng ≤ 0.18 · quay 0.22–0.80 · > 0.80 quá mạnh");
+  });
+  it("client", () => {
+    expect(yawThresholdsText(CLIENT_YAW)).toBe("thẳng ≤ 0.12 · quay 0.40–0.65 · > 0.65 quá mạnh");
   });
 });

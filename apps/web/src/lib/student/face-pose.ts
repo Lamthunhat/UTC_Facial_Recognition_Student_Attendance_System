@@ -1,4 +1,5 @@
-import { classifyFaceYaw, CLIENT_YAW, faceYaw, type YawPose, type YawThresholds } from "@utc/shared/face-yaw";
+import { classifyFaceYaw, faceYaw, type YawPose } from "@utc/shared/face-yaw";
+import { CLIENT_YAW, type YawThresholds } from "@utc/shared/face-yaw-thresholds";
 
 /**
  * Hướng dẫn quay đầu ở trình duyệt từ MediaPipe Face Detector (BlazeFace short-range) — CHỈ để hướng dẫn và tự chụp;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { CLIENT_YAW, classifyFaceYaw, faceYaw, SERVER_YAW, YAW_SCALE } from "../src/face-yaw";
+import { classifyFaceYaw, faceYaw, YAW_SCALE } from "../src/face-yaw";
+import { CLIENT_YAW, SERVER_YAW } from "../src/face-yaw-thresholds";
 import { syntheticHead } from "../src/head-model";
 
 /**
@@ -56,12 +57,13 @@ describe("faceYaw — thang mới", () => {
 });
 
 describe("classifyFaceYaw — ngưỡng theo thang mới", () => {
-  it("server: thẳng ≤ 0,18 · quay 0,30–0,80 · quá mạnh > 0,80 (không phải khung quay hợp lệ)", () => {
-    expect(SERVER_YAW).toEqual({ centerMax: 0.18, turnMin: 0.3, turnMax: 0.8 });
+  it("server: thẳng ≤ 0,18 · quay 0,22–0,80 · quá mạnh > 0,80 (không phải khung quay hợp lệ)", () => {
+    expect(SERVER_YAW).toEqual({ centerMax: 0.18, turnMin: 0.22, turnMax: 0.8 });
     expect(classifyFaceYaw(0.1, SERVER_YAW)).toBe("center");
     expect(classifyFaceYaw(0.5, SERVER_YAW)).toBe("left");
     expect(classifyFaceYaw(-0.5, SERVER_YAW)).toBe("right");
-    expect(classifyFaceYaw(0.25, SERVER_YAW)).toBe("unclear");
+    expect(classifyFaceYaw(0.2, SERVER_YAW)).toBe("unclear");
+    expect(classifyFaceYaw(0.25, SERVER_YAW)).toBe("left");
     expect(classifyFaceYaw(0.9, SERVER_YAW)).toBe("too_far");
     expect(classifyFaceYaw(-0.95, SERVER_YAW)).toBe("too_far");
     expect(classifyFaceYaw(null, SERVER_YAW)).toBe("unclear");
@@ -74,7 +76,7 @@ describe("classifyFaceYaw — ngưỡng theo thang mới", () => {
     expect(CLIENT_YAW.turnMax).toBeLessThan(SERVER_YAW.turnMax);
   });
 
-  it("theo mô hình đầu: client chấp nhận quay ~25°–48°, server ~18°–72°", () => {
+  it("theo mô hình đầu: client chấp nhận quay ~25°–48°, server ~13°–72°", () => {
     const at = (deg: number) => {
       const h = syntheticHead(deg);
       return faceYaw(h.blaze.eyeA, h.blaze.eyeB, h.blaze.nose, h.box.x2 - h.box.x1);

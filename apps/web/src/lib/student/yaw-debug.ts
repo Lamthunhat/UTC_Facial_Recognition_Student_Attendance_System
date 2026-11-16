@@ -1,4 +1,5 @@
-import { classifyFaceYaw, type YawPose, type YawThresholds } from "@utc/shared/face-yaw";
+import { classifyFaceYaw, type YawPose } from "@utc/shared/face-yaw";
+import type { YawThresholds } from "@utc/shared/face-yaw-thresholds";
 
 /**
  * Công cụ so sánh yaw client ↔ server — CHỈ preview/dev. Server quyết định bật (nonce trả `yawDebug: true`); khi đó
@@ -113,4 +114,10 @@ export function parseProbeResult(v: unknown): { passed: boolean; report: YawDebu
   const { passed, yawDebug } = v as Record<string, unknown>;
   const report = parseYawDebug(yawDebug);
   return typeof passed === "boolean" && report ? { passed, report } : null;
+}
+
+const f2 = (n: number) => n.toFixed(2);
+/** Mô tả một bộ ngưỡng (trang chẩn đoán + bảng so sánh). */
+export function yawThresholdsText(t: YawThresholds): string {
+  return `thẳng ≤ ${f2(t.centerMax)} · quay ${f2(t.turnMin)}–${f2(t.turnMax)} · > ${f2(t.turnMax)} quá mạnh`;
 }

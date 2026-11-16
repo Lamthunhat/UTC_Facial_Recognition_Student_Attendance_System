@@ -1,4 +1,4 @@
-import { CLIENT_YAW, SERVER_YAW } from "@utc/shared/face-yaw";
+import { CLIENT_YAW, SERVER_YAW } from "@utc/shared/face-yaw-thresholds";
 import { syntheticHead } from "@utc/shared/head-model";
 import { describe, expect, it } from "vitest";
 import type { Point } from "../../../src/face/align";

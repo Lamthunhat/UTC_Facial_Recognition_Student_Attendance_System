@@ -1,4 +1,5 @@
-import { faceYaw, SERVER_YAW } from "@utc/shared/face-yaw";
+import { faceYaw } from "@utc/shared/face-yaw";
+import { SERVER_YAW } from "@utc/shared/face-yaw-thresholds";
 import { syntheticHead } from "@utc/shared/head-model";
 import { describe, expect, it } from "vitest";
 import type { Point } from "../../../src/face/align";
@@ -39,7 +40,16 @@ describe("headYaw — công thức dùng chung, thang mới", () => {
 });
 
 describe("classifyPose — ngưỡng server theo thang mới", () => {
-  it("thẳng ≤ 0,18 · quay 0,30–0,80 · quá mạnh > 0,80 · vùng đệm giữa thẳng và quay", () => {
+  it("ngưỡng mới (số đo iPhone 2026-11-17): yaw 0,25 → khung quay hợp lệ; 0,20 → không hợp lệ; 0,85 → quá mạnh", () => {
+    expect(classifyPose(0.25)).toBe("left");
+    expect(classifyPose(-0.25)).toBe("right");
+    expect(classifyPose(0.2)).toBe("unclear");
+    expect(classifyPose(-0.2)).toBe("unclear");
+    expect(classifyPose(0.85)).toBe("too_far");
+    expect(classifyPose(-0.85)).toBe("too_far");
+  });
+
+  it("thẳng ≤ 0,18 · quay 0,22–0,80 · quá mạnh > 0,80 · vùng đệm giữa thẳng và quay", () => {
     expect(classifyPose(0)).toBe("center");
     expect(classifyPose(SERVER_YAW.centerMax)).toBe("center");
     expect(classifyPose(SERVER_YAW.turnMin)).toBe("left");

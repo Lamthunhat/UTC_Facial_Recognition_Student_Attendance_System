@@ -32,10 +32,20 @@ Mỗi mục theo dạng: Quyết định · Lý do · Phương án đã cân nh�
 
     | | Nhìn thẳng | Quay hợp lệ | Quá mạnh |
     |---|---|---|---|
-    | Server `SERVER_YAW` | ≤ 0,18 (~10°) | 0,30–0,80 (~18°–72°) | > 0,80 → không phải khung quay hợp lệ → `LIVENESS_FAILED` |
+    | Server `SERVER_YAW` | ≤ 0,18 (~10°) | **0,22**–0,80 (~13°–72°; trước 2026-11-17: 0,30 ~18°) | > 0,80 → không phải khung quay hợp lệ → `LIVENESS_FAILED` |
     | Client `CLIENT_YAW` (chặt hơn ở cả 3 mốc) | ≤ 0,12 (~7°) | 0,40–0,65 (~25°–48°) | > 0,65 → "Quay vừa phải" |
 
-    Góc trong ngoặc theo mô hình đầu (đầu elip rộng 1, sâu 1,2; mũi nhô 0,2 so với mắt) — người thật khác mô hình nên cần đo.
+    Góc trong ngoặc theo mô hình đầu (đầu elip rộng 1, sâu 1,2; mũi nhô 0,2 so với mắt) — người thật khác mô hình nên cần đo. Hai bộ ngưỡng nằm **một chỗ**: `@utc/shared/face-yaw-thresholds` (client, server, yaw-debug, trang chẩn đoán đều import từ đó).
+  - **Hiệu chỉnh 2026-11-17 — số đo iPhone thật** ("Thử liveness (không tốn lượt)", Vercel Preview, iOS Safari), yaw client C (MediaPipe lúc tự chụp) / server S (SCRFD trên cùng khung):
+
+    | Khung | Client | Server | |S| − |C| |
+    |---|---|---|---|
+    | Trái | 0,501 | 0,552 | +0,051 |
+    | Thẳng | −0,088 | −0,093 | +0,005 |
+    | Phải | −0,410 | −0,321 | **−0,089** |
+
+    Ở chiều quay, server có thể đo **thấp hơn client ~0,09** về độ lớn (một chiều cao hơn, chiều kia thấp hơn — có thể do mặt/ánh sáng không đối xứng, mới 1 lượt đo). Với ngưỡng cũ, SV quay vừa đủ theo client (0,40) có thể ra server 0,31 — sát mốc 0,30, chỉ còn 0,01 → `LIVENESS_FAILED` oan (đúng như lỗi đã gặp). **Chọn server `turnMin` = 0,22** (~13° theo mô hình đầu): biên tới mốc client 0,18 ≈ 2× độ lệch đo được; vẫn có vùng đệm 0,04 trên mốc thẳng 0,18 nên khung nhìn thẳng (|S| ~0,09) không thể bị nhận là quay. Hạ thấp hơn nữa thì vùng đệm thẳng/quay mất; client không đổi (0,40 vẫn dễ đạt khi có hướng dẫn trực tiếp). Chống giả mạo bằng ảnh tĩnh không dựa vào độ lớn góc mà vào chuỗi thử thách ngẫu nhiên + cùng một người, nên nới 0,30 → 0,22 không làm yếu đáng kể.
+  - **Công thức biên an toàn** (`YAW_MARGINS`, `yawMarginViolations`; test bất biến `packages/shared/tests/face-yaw-thresholds.test.ts` — sửa ngưỡng sai biên thì test fail): `client.turnMin − server.turnMin ≥ 0,15` (≥ độ lệch đo được 0,09 + dư) · `server.centerMax − client.centerMax ≥ 0,05` · `server.turnMax − client.turnMax ≥ 0,10` · `server.centerMax < server.turnMin < server.turnMax` (không chồng lấn). Hiện tại: 0,18 · 0,06 · 0,15 · 0,18 < 0,22 < 0,80. Còn chờ: đo thêm (Android, nhiều người, ánh sáng khác) trong T011.
   - **Tự host + cache**: `public/mediapipe/tasks-vision-1.2.0/` (wasm, chép từ `node_modules`) và `public/mediapipe/blaze_face_short_range.<sha256[0:12]>.tflite` (tải bằng `pnpm models:download`), đều kiểm sha256; tên có phiên bản/hash → `Cache-Control: public, max-age=31536000, immutable`. Đường dẫn khai báo một chỗ (`apps/web/src/lib/student/mediapipe-assets.ts`, có test đối chiếu script build).
   - **CSP theo khu**: `'wasm-unsafe-eval'` cho **toàn khu SV đã đăng nhập `/sv/*`** (thẻ, chẩn đoán, sau này check-in) — `needsWasm()` trong `security/headers.ts`. Trước đó chỉ ở `/sv/the-sinh-vien` và phải tải lại document khi vào/ra (`AppLink`) vì CSP gắn với document (`next/link` giữ CSP cũ → wasm bị chặn, đã gặp khi thử). Nay cả khu một chính sách → `next/link` bình thường; chỉ đăng nhập SV (`/sv` → `/sv/*`) và đăng xuất tải document mới. `/sv` (đăng nhập), `/gv`, `/admin`, `/login`, `/api` giữ CSP chặt. Đánh đổi: các trang SV không dùng wasm cũng được biên dịch WebAssembly — chấp nhận vì `'wasm-unsafe-eval'` không mở `eval` JS và script vẫn bị `nonce` + `strict-dynamic` chặn.
   - **Tải thêm** (chỉ khi tới bước khuôn mặt, tải sẵn từ màn giới thiệu): chunk JS ~155 KB (gzip ~45 KB) + `vision_wasm_internal.js` 334 KB + wasm **14,5 MB** (máy không SIMD: bản nosimd 12,9 MB) + model **0,23 MB** → **~15,0 MB sau giải nén, ~4,4 MB qua mạng** khi máy chủ nén gzip (đo trên `next start` cục bộ: `.wasm` trả `content-encoding: gzip`). Phần lớn là wasm — dùng chung cho mọi tác vụ tasks-vision, đổi model không giảm được. Lần sau lấy từ cache (immutable).

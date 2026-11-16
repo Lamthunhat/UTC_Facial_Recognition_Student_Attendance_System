@@ -1,4 +1,5 @@
-import { CLIENT_YAW, SERVER_YAW, type YawPose, type YawThresholds } from "@utc/shared/face-yaw";
+import type { YawPose } from "@utc/shared/face-yaw";
+import { CLIENT_YAW, SERVER_YAW, type YawThresholds } from "@utc/shared/face-yaw-thresholds";
 import type { Point } from "./align";
 import { classifyPose, expectedPoses, headYaw, LIVENESS_RULES, type Challenge, type LiveFrameError, type Pose } from "./liveness";
 
