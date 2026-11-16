@@ -1,24 +1,27 @@
 import "server-only";
 import { randomInt, randomUUID } from "node:crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@utc/database";
 import { studentCards, students } from "@utc/database/schema";
 import { vnDateOf } from "@utc/shared/periods";
 import { writeAudit } from "../audit";
 import type { SessionClaims } from "../auth/jwt";
 import { removeObjects, signedUrl, uploadObject, type Bucket } from "../evidence/storage";
-import { checkLiveFrames, isChallenge, LIVENESS_RULES, samePerson, type Challenge, type LiveFrameError } from "../face/liveness";
+import { isChallenge, type Challenge, type LiveFrameError } from "../face/liveness";
 import { cosine } from "../face/similarity";
+import { parseClientYaw, yawDebugEnabled, yawDebugReport, type YawDebugReport } from "../face/yaw-debug";
 import { HttpError, tooManyRequests } from "../http/errors";
 import { log } from "../log";
 import { consumeNonce, issueNonce } from "../security/nonce";
-import { enforce, hit, RULES } from "../security/rate-limit";
+import { enforce, hit, refund, RULES } from "../security/rate-limit";
 import { sanitizeImage, UploadError } from "../security/upload";
+import { ALLOWED_IMAGE_TYPES, evaluateLiveFrames, sanitizeLiveFrames, uploadErrorToHttp } from "./live";
 import { requireConsent } from "../student/consent";
-import { decodeCard } from "./decode";
+import { decodeCard, type DecodeStats } from "./decode";
+import { stepTimer } from "./step-timer";
 import { analyzePortraits, type AnalyzedPortraits } from "./portrait";
 import { cardPurgeAfter } from "./retention";
-import { duplicateDecision, evaluateCard, nameAppearsIn, type CardRejectCode, type CardReviewReason, type DecodedCode } from "./verify";
+import { duplicateDecision, evaluateCard, nameAppearsIn, ocrNameLine, type CardRejectCode, type CardReviewReason, type DecodedCode } from "./verify";
 
 /**
  * T058 — Đăng ký thẻ sinh viên (US6, FR-045…FR-049, FR-045a, Principle I/III/IV, FR-082).
@@ -38,7 +41,7 @@ export interface CardStorage {
   signedUrl(bucket: Bucket, path: string): Promise<string>;
 }
 export interface CardDeps {
-  decode(jpeg: Buffer): Promise<{ decoded: DecodedCode | null; text: string }>;
+  decode(jpeg: Buffer): Promise<{ decoded: DecodedCode | null; text: string; stats?: DecodeStats }>;
   analyzeFaces(jpeg: Buffer): Promise<AnalyzedPortraits>;
   /** Phân tích một khung mặt trực tiếp (cùng pipeline ONNX; tách riêng để test giả lập từng khung). */
   analyzeLive(jpeg: Buffer): Promise<AnalyzedPortraits>;
@@ -64,8 +67,7 @@ export function resetCardDepsForTest() {
 export const cardDeps = () => deps;
 
 export const CARD_IMAGE_MAX_BYTES = 1024 * 1024; // FR-090: ảnh thẻ ≤ 1 MB
-export const LIVE_FRAME_MAX_BYTES = 1024 * 1024; // FR-090: mỗi khung mặt trực tiếp ≤ 1 MB
-export const LIVE_FRAME_COUNT = 3;
+export { LIVE_FRAME_COUNT, LIVE_FRAME_MAX_BYTES } from "./live";
 
 const threshold = (name: string, fallback: number) => {
   const v = Number(process.env[name] ?? fallback);
@@ -117,59 +119,69 @@ export async function issueCardNonce(session: SessionClaims) {
   // Thử thách quay đầu ngẫu nhiên (research R2): chặn phát lại video/ảnh quay sẵn.
   const challenge: Challenge = randomInt(2) === 0 ? ["left", "right"] : ["right", "left"];
   const n = await issueNonce(session.sub, "card", { challenge });
-  return { nonce: n.nonce, expiresAt: n.expiresAt, challenge };
+  // Preview/dev: báo client gửi kèm yaw lúc chụp để so với server (face/yaw-debug.ts). Production: không có trường này.
+  return { nonce: n.nonce, expiresAt: n.expiresAt, challenge, ...(yawDebugEnabled() ? { yawDebug: true as const } : {}) };
 }
 
-function uploadErrorToHttp(e: UploadError) {
-  return e.code === "FILE_TOO_LARGE"
-    ? new HttpError(413, "PAYLOAD_TOO_LARGE", "Ảnh vượt quá 1 MB.")
-    : new HttpError(422, e.code, e.code === "UNSUPPORTED_TYPE" ? "Ảnh không đúng định dạng (chỉ nhận JPEG/PNG/WebP/HEIC)." : "Không đọc được ảnh. Vui lòng chụp lại.");
-}
+/** Lỗi phía server đã phân loại — lượt đăng ký thẻ được hoàn (lỗi 500 không phân loại thì không). */
+const REFUNDABLE_CODES = new Set(["STORAGE_BUCKET_MISSING", "STORAGE_UNAVAILABLE", "OCR_UNAVAILABLE"]);
+
+type CardInput = { nonce: string; image: Buffer; frames: Buffer[]; clientYaw?: string };
+type CardResult = { status: "active" | "pending_review"; decodedCode: string; yawDebug?: YawDebugReport };
 
 export async function registerCard(
   session: SessionClaims,
-  input: { nonce: string; image: Buffer; frames: Buffer[] },
+  input: CardInput,
   ip: string | null,
-): Promise<{ status: "active" | "pending_review"; decodedCode: string }> {
+): Promise<CardResult> {
   const studentId = session.sub;
   await assertCanRegisterCard(studentId);
   const { challenge } = await consumeNonce({ nonce: input.nonce, studentId, purpose: "card", ip });
   if (!isChallenge(challenge)) throw new HttpError(403, "BAD_NONCE", "Phiên chụp không hợp lệ. Vui lòng chụp lại.");
-  // Tính lượt (6/giờ/SV) — chỉ lượt đã qua nonce hợp lệ. Lỗi từ đây trở đi kèm remainingAttempts để UI báo số lượt còn lại.
-  const attempt = await hit(`card:${studentId}`, RULES.cardRegister);
-  const remainingAttempts = Math.max(0, RULES.cardRegister.limit - attempt.count);
+  // Tính lượt — chỉ lượt đã qua nonce hợp lệ. Lỗi từ đây trở đi kèm remainingAttempts để UI báo số lượt còn lại.
+  // 6 lượt/giờ (lượt lỗi phía server đã phân loại được hoàn) + trần tổng 20 lượt/giờ (không bao giờ hoàn).
+  const attemptKey = `card:${studentId}`;
+  const attempt = await hit(attemptKey, RULES.cardRegister);
   if (!attempt.allowed) throw tooManyRequests(attempt.retryAfterSec, { remainingAttempts: 0 });
+  const total = await hit(`card-total:${studentId}`, RULES.cardRegisterTotal);
+  if (!total.allowed) throw tooManyRequests(total.retryAfterSec, { remainingAttempts: 0 });
+  const remaining = (attemptsUsed: number) =>
+    Math.max(0, Math.min(RULES.cardRegister.limit - attemptsUsed, RULES.cardRegisterTotal.limit - total.count));
+  const remainingAttempts = remaining(attempt.count);
+  // Thời gian từng bước — chỉ log ở dev (đo hiệu năng cục bộ; production không ghi)
+  const timer: ReturnType<typeof stepTimer> & { decodeStats?: DecodeStats } = stepTimer();
   try {
-    return await processCard(session, studentId, input, challenge);
+    return await processCard(session, studentId, input, challenge, timer);
   } catch (e) {
+    // Lỗi phía server ĐÃ PHÂN LOẠI (không phải lỗi của ảnh/SV) → hoàn lượt 6/giờ; trần tổng vẫn tính.
+    if (e instanceof HttpError && REFUNDABLE_CODES.has(e.code)) {
+      await refund(attemptKey);
+      throw e.withExtra({ remainingAttempts: remaining(attempt.count - 1) });
+    }
     if (e instanceof HttpError && e.status < 500) throw e.withExtra({ remainingAttempts });
-    throw e;
+    throw e; // lỗi không phân loại (500): không hoàn, không kèm remainingAttempts
+  } finally {
+    if (process.env.NODE_ENV === "development") log.info("card_register_timing", { ms: timer.done(), decode: timer.decodeStats });
   }
 }
 
 async function processCard(
   session: SessionClaims,
   studentId: string,
-  input: { nonce: string; image: Buffer; frames: Buffer[] },
+  input: CardInput,
   challenge: Challenge,
-): Promise<{ status: "active" | "pending_review"; decodedCode: string }> {
-  if (input.frames.length !== LIVE_FRAME_COUNT) {
-    throw new HttpError(422, "VALIDATION_ERROR", "Cần đúng 3 khung hình khuôn mặt theo hướng dẫn.");
-  }
-
-  const allowed: ("image/jpeg" | "image/png" | "image/webp" | "image/heic")[] = ["image/jpeg", "image/png", "image/webp", "image/heic"];
+  timer: ReturnType<typeof stepTimer> & { decodeStats?: DecodeStats },
+): Promise<CardResult> {
   let jpeg: Buffer;
-  let frames: Buffer[];
   try {
-    jpeg = (await sanitizeImage(input.image, { maxBytes: CARD_IMAGE_MAX_BYTES, allowed, maxSide: 2048, quality: 90 })).buffer;
-    frames = await Promise.all(
-      input.frames.map(async (f) => (await sanitizeImage(f, { maxBytes: LIVE_FRAME_MAX_BYTES, allowed, maxSide: 1280, quality: 85 })).buffer),
-    );
+    jpeg = (await sanitizeImage(input.image, { maxBytes: CARD_IMAGE_MAX_BYTES, allowed: ALLOWED_IMAGE_TYPES, maxSide: 2048, quality: 90 })).buffer;
   } catch (e) {
     if (e instanceof UploadError) throw uploadErrorToHttp(e);
     throw e;
   }
+  const frames = await sanitizeLiveFrames(input.frames);
 
+  timer.mark("sanitize");
   const db = await getDb();
   const [me] = await db
     .select({ code: students.studentCode, lastName: students.lastName, firstName: students.firstName })
@@ -178,23 +190,24 @@ async function processCard(
     .limit(1);
   if (!me) throw new HttpError(401, "UNAUTHORIZED", "Bạn cần đăng nhập.");
 
-  const [{ decoded, text }, portraits] = await Promise.all([deps.decode(jpeg), deps.analyzeFaces(jpeg)]);
+  const [{ decoded, text, stats }, portraits] = await Promise.all([deps.decode(jpeg), deps.analyzeFaces(jpeg)]);
+  timer.decodeStats = stats;
+  timer.mark("decode_and_portrait");
   const nameMatched = text.trim() ? nameAppearsIn(text, `${me.lastName} ${me.firstName}`) : null;
   const verdict = evaluateCard({ sessionCode: me.code, decoded, faces: portraits.faces, nameMatched });
   if (!verdict.ok) throw new HttpError(422, verdict.error, REJECT_MESSAGES[verdict.error]);
 
   // Liveness (FR-045a): 3 khung mặt trực tiếp đúng thử thách quay đầu và cùng một người. Sai → từ chối.
-  const live = await Promise.all(frames.map((f) => deps.analyzeLive(f)));
-  const liveCheck = checkLiveFrames(
-    live.map((l) => l.faces.filter((f) => f.kps).map((f) => ({ box: f.box, kps: f.kps! }))),
-    challenge,
-  );
-  if (!liveCheck.ok) throw new HttpError(422, liveCheck.error, LIVE_MESSAGES[liveCheck.error]);
-  const liveEmbeddings = await Promise.all(live.map((l) => l.embed(0)));
-  if (!samePerson(liveEmbeddings, liveCheck.centerIndex, LIVENESS_RULES.samePersonMin)) {
-    throw new HttpError(422, "LIVENESS_FAILED", LIVE_MESSAGES.LIVENESS_FAILED);
-  }
+  const liveCheck = await evaluateLiveFrames(frames, challenge, deps.analyzeLive);
+  // Preview/dev: yaw server từng khung + yaw client + lý do (công cụ hiệu chỉnh). Production: không có, không log.
+  const debugOn = yawDebugEnabled();
+  const clientYaw = debugOn ? parseClientYaw(input.clientYaw) : null;
+  const debug = (reason: Parameters<typeof yawDebugReport>[3]) =>
+    debugOn ? { yawDebug: yawDebugReport(liveCheck.faces, challenge, clientYaw, reason) } : {};
+  if (!liveCheck.ok) throw new HttpError(422, liveCheck.error, LIVE_MESSAGES[liveCheck.error], {}, debug(liveCheck.reason));
+  const liveEmbeddings = liveCheck.embeddings;
 
+  timer.mark("liveness");
   const embedding = await portraits.embed(verdict.faceIndex);
   if (embedding.length !== 512) throw new Error(`Embedding sai số chiều: ${embedding.length}`);
   const portrait = await portraits.crop(verdict.faceIndex);
@@ -226,6 +239,7 @@ async function processCard(
   const cardPath = `${studentId}/${cardId}/card.jpg`;
   const portraitPath = `${studentId}/${cardId}/portrait.jpg`;
 
+  timer.mark("match");
   const uploaded: string[] = [];
   try {
     uploaded.push(await deps.storage.upload("cards", cardPath, jpeg, "image/jpeg"));
@@ -245,6 +259,8 @@ async function processCard(
         duplicateSimilarity: dup?.similarity ?? null,
         nameMatched,
         liveSimilarity,
+        // Chỉ lưu dòng họ tên OCR khi cần giảng viên đối chiếu (tối thiểu hoá dữ liệu)
+        ocrName: reviewReasons.includes("NAME_MISMATCH") ? ocrNameLine(text) : null,
         purgeAfter: await cardPurgeAfter(tx, studentId),
       });
       await writeAudit(session, "card.register", { type: "student_card", id: cardId }, { status, method: decoded!.method, reviewReasons, liveSimilarity: Math.round(liveSimilarity * 1000) / 1000 }, tx);
@@ -258,16 +274,29 @@ async function processCard(
     throw e;
   }
   // Không trả lý do chờ duyệt cho SV (không lộ là mặt trùng với ai) — chỉ giảng viên xem (card/admin.ts).
-  return { status, decodedCode: decoded!.code };
+  timer.mark("save");
+  return { status, decodedCode: decoded!.code, ...debug(null) };
 }
 
 /** Trạng thái thẻ của chính SV — không trả embedding, đường dẫn ảnh hay lý do nghi vấn. */
-export async function myCardStatus(studentId: string) {
+/**
+ * Trạng thái thẻ cho chính SV (không lý do, không ảnh). Không có thẻ hiệu lực → xem thẻ gần nhất:
+ * `deleted` do giảng viên từ chối (có reviewed_by) → "rejected"; `replaced` (giảng viên/Admin đặt lại) → "reset".
+ * Cả hai: SV đăng ký lại được. (Cron xoá hết hạn — Polish — phải không để lại `deleted` + reviewed_by.)
+ */
+export type MyCardStatus = "active" | "pending_review" | "rejected" | "reset";
+
+export async function myCardStatus(studentId: string): Promise<{ status: MyCardStatus; registeredAt: Date } | null> {
   const db = await getDb();
   const [c] = await db
-    .select({ status: studentCards.status, registeredAt: studentCards.registeredAt })
+    .select({ status: studentCards.status, registeredAt: studentCards.registeredAt, reviewedBy: studentCards.reviewedBy })
     .from(studentCards)
-    .where(and(eq(studentCards.studentId, studentId), inArray(studentCards.status, ["active", "pending_review"])))
+    .where(eq(studentCards.studentId, studentId))
+    .orderBy(sql`case when ${studentCards.status} in ('active','pending_review') then 0 else 1 end`, desc(studentCards.registeredAt))
     .limit(1);
-  return c ?? null;
+  if (!c) return null;
+  if (c.status === "active" || c.status === "pending_review") return { status: c.status, registeredAt: c.registeredAt };
+  if (c.status === "deleted" && c.reviewedBy) return { status: "rejected", registeredAt: c.registeredAt };
+  if (c.status === "replaced") return { status: "reset", registeredAt: c.registeredAt };
+  return null;
 }

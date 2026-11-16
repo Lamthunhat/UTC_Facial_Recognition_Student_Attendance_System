@@ -112,3 +112,17 @@ export function duplicateDecision(
   );
   return best && best.similarity >= threshold ? best : null;
 }
+
+/**
+ * Dòng họ tên đọc bằng OCR (phần sau nhãn "Họ tên" / "Họ và tên") — lưu kèm thẻ để giảng viên đối chiếu khi
+ * NAME_MISMATCH. Không phải dữ liệu sinh trắc; tối đa 80 ký tự; không có nhãn → null.
+ */
+export function ocrNameLine(text: string): string | null {
+  for (const raw of text.split(/\r?\n/)) {
+    const m = /^\s*h[oọ]\s*(?:v[aà]\s*)?t[eê]n\s*:?\s*(.*)$/iu.exec(raw.normalize("NFC"));
+    if (!m) continue;
+    const name = m[1].replace(/\s+/g, " ").trim();
+    if (name) return name.slice(0, 80);
+  }
+  return null;
+}

@@ -49,12 +49,15 @@ export async function getStudentCard(studentId: string) {
       purgeAfter: studentCards.purgeAfter,
       cardImagePath: studentCards.cardImagePath,
       portraitImagePath: studentCards.portraitImagePath,
+      liveSimilarity: studentCards.liveSimilarity,
+      ocrName: studentCards.ocrName,
     })
     .from(studentCards)
     .where(eq(studentCards.studentId, studentId))
     .orderBy(sql`case when ${studentCards.status} in ('active','pending_review') then 0 else 1 end`, desc(studentCards.registeredAt))
     .limit(1);
   if (!c) return null;
+  const [me] = await db.select({ lastName: students.lastName, firstName: students.firstName }).from(students).where(eq(students.id, studentId)).limit(1);
 
   let duplicateOf = null;
   if (c.duplicateStudentId) {
@@ -73,6 +76,13 @@ export async function getStudentCard(studentId: string) {
     decodeMethod: c.decodeMethod,
     reviewReasons: c.reviewReasons,
     nameMatched: c.nameMatched,
+    /** Không có chữ OCR (OCR lỗi / không đọc được) → họ tên CHƯA được kiểm; giảng viên tự đối chiếu ảnh thẻ. */
+    nameUnverified: c.nameMatched === null,
+    /** Họ tên trong danh sách lớp + dòng họ tên OCR (chỉ có khi NAME_MISMATCH) để đối chiếu. */
+    rosterName: me ? `${me.lastName} ${me.firstName}` : null,
+    ocrName: c.ocrName,
+    /** Cosine mặt trực tiếp ↔ chân dung thẻ lúc đăng ký (LIVE_MISMATCH khi < CARD_ACCEPT_ABOVE). */
+    liveSimilarity: c.liveSimilarity,
     duplicateOf,
     registeredAt: c.registeredAt,
     purgeAfter: c.purgeAfter,

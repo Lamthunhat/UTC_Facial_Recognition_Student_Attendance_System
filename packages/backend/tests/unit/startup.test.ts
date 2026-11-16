@@ -61,6 +61,29 @@ describe("checkEnvOnStartup", () => {
     expect(JSON.parse(errors[0]).names).toEqual(["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "CRON_SECRET"]);
   });
 
+  describe("SUPABASE_URL phải là origin thuần (https, không path, không '/' cuối)", () => {
+    for (const [bad, why] of [
+      ["https://abcd1234.supabase.co/rest/v1", "có path /rest/v1"],
+      ["https://abcd1234.supabase.co/", "có '/' cuối"],
+      ["http://abcd1234.supabase.co", "http (không phải localhost)"],
+      ["https://abcd1234.supabase.co?x=1", "có query"],
+    ] as const) {
+      it(`${why} → env_invalid SUPABASE_URL, gợi ý bỏ "/rest/v1", không in giá trị`, () => {
+        const err = startupError({ ...POSTGRES, SUPABASE_URL: bad });
+        expect(JSON.parse(errors[0])).toMatchObject({ msg: "env_invalid", names: ["SUPABASE_URL"] });
+        expect(err.message).toMatch(/origin/);
+        expect(err.message).toMatch(/\/rest\/v1/);
+        expect(err.message).not.toContain("abcd1234");
+      });
+    }
+
+    it("hợp lệ: https://<ref>.supabase.co; http chỉ cho localhost / 127.0.0.1 (Supabase CLI)", () => {
+      expect(() => checkEnvOnStartup({ ...POSTGRES, SUPABASE_URL: "https://abcd1234.supabase.co" })).not.toThrow();
+      expect(() => checkEnvOnStartup({ ...POSTGRES, SUPABASE_URL: "http://127.0.0.1:54321" })).not.toThrow();
+      expect(() => checkEnvOnStartup({ ...POSTGRES, SUPABASE_URL: "http://localhost:54321" })).not.toThrow();
+    });
+  });
+
   it("pglite (dev cục bộ): chỉ cần DATABASE_URL + JWT_SECRET + LOG_HMAC_SECRET", () => {
     expect(() => checkEnvOnStartup(PGLITE)).not.toThrow();
   });

@@ -6,14 +6,29 @@ export interface CspOptions {
   dev?: boolean;
   /** Origin kho ảnh (Supabase) để hiển thị ảnh bằng chứng qua signed URL. */
   storageOrigin?: string;
+  /** Khu SV /sv/* (nhận diện mặt ở trình duyệt bằng MediaPipe wasm) — thêm 'wasm-unsafe-eval'. Xem needsWasm(). */
+  wasm?: boolean;
 }
 
-export function buildCsp({ nonce, dev = false, storageOrigin }: CspOptions): string {
+/**
+ * Biên dịch WebAssembly ở trình duyệt (MediaPipe Face Detector tự host) cho TOÀN KHU SV đã đăng nhập /sv/* — đăng ký thẻ,
+ * trang chẩn đoán, check-in (US2). CSP gắn với DOCUMENT: cả khu dùng một chính sách nên next/link / router.push giữa các
+ * trang SV luôn có 'wasm-unsafe-eval', không cần tải lại document. /sv (đăng nhập SV), /gv, /admin, /login, /api giữ CSP
+ * chặt; ranh giới duy nhất là đăng nhập SV (/sv → /sv/*) và đăng xuất — hai chỗ đó tải document mới.
+ */
+export const WASM_AREA_PREFIX = "/sv/";
+
+export function needsWasm(pathname: string): boolean {
+  return pathname.startsWith(WASM_AREA_PREFIX);
+}
+
+export function buildCsp({ nonce, dev = false, storageOrigin, wasm = false }: CspOptions): string {
   const img = ["'self'", "blob:", "data:", storageOrigin].filter(Boolean).join(" ");
   const directives: Record<string, string> = {
     "default-src": "'self'",
-    // strict-dynamic: chỉ script có nonce (và script do chúng nạp) được chạy
-    "script-src": `'self' 'nonce-${nonce}' 'strict-dynamic'${dev ? " 'unsafe-eval'" : ""}`,
+    // strict-dynamic: chỉ script có nonce (và script do chúng nạp) được chạy.
+    // 'wasm-unsafe-eval' CHỈ ở khu SV /sv/* (needsWasm): cho biên dịch WebAssembly, không mở eval JS.
+    "script-src": `'self' 'nonce-${nonce}' 'strict-dynamic'${wasm ? " 'wasm-unsafe-eval'" : ""}${dev ? " 'unsafe-eval'" : ""}`,
     "style-src": `'self' 'unsafe-inline'`,
     "img-src": img,
     "font-src": "'self'",

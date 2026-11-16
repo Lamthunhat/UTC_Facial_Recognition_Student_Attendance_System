@@ -199,6 +199,9 @@ export default function RosterImportPage() {
           ← Lớp của tôi
         </Link>
         <h1 className="mt-1 text-xl font-semibold">Nhập danh sách sinh viên</h1>
+        <Link href={`/gv/lop/${classId}/the`} className="text-sm text-primary hover:underline">
+          Thẻ sinh viên của lớp →
+        </Link>
         {cls && (
           <p className="text-sm text-muted-foreground">
             {cls.code} · {cls.courseName} · đang có <strong className="text-foreground">{cls.activeStudents}</strong> sinh viên

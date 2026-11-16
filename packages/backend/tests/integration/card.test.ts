@@ -2,11 +2,13 @@ import { useTestAppDb } from "@utc/database/testing";
 import { CONSENT_VERSION } from "@utc/shared/consent";
 import { vnDateOf, vnDateTime } from "@utc/shared/periods";
 import sharp from "sharp";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET as staffGetCard } from "../../src/api/admin/student-card";
 import { POST as staffResetCard } from "../../src/api/admin/student-card-reset";
 import { POST as staffReviewCard } from "../../src/api/admin/student-card-review";
 import { GET as myCard, POST as uploadCard } from "../../src/api/student/card";
+import { GET as myClasses } from "../../src/api/student/classes";
+import { GET as classCards } from "../../src/api/classes/cards";
 import { POST as cardNonce } from "../../src/api/student/card-nonce";
 import { POST as giveConsent } from "../../src/api/student/consent";
 import { createSession, SESSION_COOKIE } from "../../src/auth/session";
@@ -75,8 +77,13 @@ const kpsFor = (pose: "left" | "right" | "center"): [number, number][] => {
 };
 const liveFace = (pose: "left" | "right" | "center"): PortraitFace => ({ ...goodFaceBase, kps: kpsFor(pose) });
 
+/** Giả lập decode ném lỗi (vd. 503 OCR_UNAVAILABLE); null = bình thường. */
+let decodeError: (() => Error) | null = null;
 const fakeDeps: CardDeps = {
-  decode: async () => nextDecode,
+  decode: async () => {
+    if (decodeError) throw decodeError();
+    return nextDecode;
+  },
   analyzeFaces: async () => ({
     faces: nextFaces,
     embed: async () => nextEmbedding,
@@ -91,6 +98,7 @@ const fakeDeps: CardDeps = {
   },
   storage: {
     upload: async (bucket, path, body, contentType) => {
+      if (uploadFailAt !== null && uploads.length === uploadFailAt) throw uploadError();
       uploads.push({ bucket, path, body, contentType });
       return path;
     },
@@ -100,6 +108,9 @@ const fakeDeps: CardDeps = {
     signedUrl: async (bucket, path) => `https://storage.test/${bucket}/${path}?token=t`,
   },
 };
+/** Giả lập upload lỗi ở lần upload thứ uploadFailAt (0 = ảnh thẻ, 1 = chân dung); null = không lỗi. */
+let uploadFailAt: number | null = null;
+let uploadError: () => Error = () => new Error("Upload thất bại (500)");
 const goodFace: PortraitFace = goodFaceBase;
 const scenario = (code: string, seed: number, over: Partial<{ method: "barcode" | "ocr"; text: string; faces: PortraitFace[] }> = {}) => {
   nextDecode = { decoded: { code, method: over.method ?? "barcode" }, text: over.text ?? "" };
@@ -194,6 +205,7 @@ beforeAll(async () => {
   await sv("N", "231230810", "Đỗ Hữu", "Khánh", []); // không thuộc lớp nào
   await sv("L", "231230811", "Lê Văn", "Lâm", ["K1"]); // ca liveness
   await sv("P", "231230812", "Phan Thị", "Phương", ["K1"]); // ca thẻ bị từ chối không lưu gì
+  await sv("Y", "231230813", "Vũ Thị", "Yến", ["K1"]); // công cụ so sánh yaw (preview/dev)
   for (const [who, seed] of [["B", 2], ["D", 4]] as const) {
     await q(
       `insert into student_cards (student_id, embedding, decoded_code, decode_method, status) values ($1, $2::vector, $3, 'barcode', 'active')`,
@@ -206,6 +218,9 @@ afterAll(async () => {
   await ctx.close();
 });
 beforeEach(async () => {
+  uploadFailAt = null;
+  decodeError = null;
+  uploadError = () => new Error("Upload thất bại (500)"); // đặt lại mỗi ca — ca trước lỗi giữa chừng không rò sang
   uploads.length = 0;
   removed.length = 0;
   await q(`delete from rate_limits`); // mỗi ca độc lập; ca kiểm rate limit tự làm trong một `it`
@@ -280,6 +295,127 @@ describe("nonce dùng một lần (FR-082)", () => {
     const again = await submit("G", n);
     expect(again.status).toBe(403);
     expect((await readJson(again)).error.code).toBe("BAD_NONCE");
+  });
+});
+
+describe("upload ảnh lỗi → không còn dòng DB / audit / file dở dang", () => {
+  const fresh = async (code: string) => {
+    const id = (await q<{ id: string }>(`insert into students (student_code,last_name,first_name) values ($1,'Thử','Upload') returning id`, [code]))[0].id;
+    await q(`insert into enrollments (class_id, student_id) values ($1,$2)`, [ids.K1, id]);
+    ids[code] = id;
+    cookie[code] = `${SESSION_COOKIE}=${(await createSession(id, "student")).token}`;
+    await consent(code);
+    return id;
+  };
+  const leftovers = async (id: string) => ({
+    cards: (await q(`select 1 from student_cards where student_id=$1`, [id])).length,
+    audits: (await q(`select 1 from audit_logs where action='card.register' and actor_id=$1`, [id])).length,
+  });
+
+  it("ảnh chân dung upload lỗi (ảnh thẻ đã lên) → xoá ảnh thẻ đã lên; không có thẻ, không có audit", async () => {
+    const id = await fresh("231230895");
+    scenario("231230895", 95);
+    uploadFailAt = 1;
+    const res = await submit("231230895");
+    expect(res.status).toBe(500);
+    expect(await leftovers(id)).toEqual({ cards: 0, audits: 0 });
+    expect(uploads.map((u) => u.path)).toHaveLength(1);
+    expect(removed.flatMap((r) => r.paths)).toEqual(uploads.map((u) => u.path)); // dọn file đã lên
+  });
+
+  it("bucket chưa tạo (503 STORAGE_BUCKET_MISSING) ngay ảnh đầu → báo lỗi cấu hình; không có thẻ, không có audit, không file", async () => {
+    const id = await fresh("231230896");
+    scenario("231230896", 96);
+    uploadFailAt = 0;
+    const { HttpError } = await import("../../src/http/errors");
+    uploadError = () => new HttpError(503, "STORAGE_BUCKET_MISSING", "Kho lưu ảnh chưa được cấu hình. Vui lòng báo quản trị viên.");
+    const res = await submit("231230896");
+    expect(res.status).toBe(503);
+    expect((await readJson(res)).error.code).toBe("STORAGE_BUCKET_MISSING");
+    expect(await leftovers(id)).toEqual({ cards: 0, audits: 0 });
+    expect(uploads).toHaveLength(0);
+    uploadError = () => new Error("Upload thất bại (500)");
+  });
+});
+
+describe("hoàn lượt khi lỗi phía server đã phân loại; trần tổng 20 lượt/giờ (kể cả lượt được hoàn)", () => {
+  let seq = 880;
+  const fresh = async () => {
+    const code = `2312308${seq++}`;
+    const id = (await q<{ id: string }>(`insert into students (student_code,last_name,first_name) values ($1,'Thử','Hoàn') returning id`, [code]))[0].id;
+    await q(`insert into enrollments (class_id, student_id) values ($1,$2)`, [ids.K1, id]);
+    ids[code] = id;
+    cookie[code] = `${SESSION_COOKIE}=${(await createSession(id, "student")).token}`;
+    await consent(code);
+    scenario(code, seq);
+    return { code, id };
+  };
+  const counter = async (key: string) => Number((await q<{ count: number }>(`select count from rate_limits where key=$1`, [key]))[0]?.count ?? 0);
+  const httpErr = async (status: number, code: string) => {
+    const { HttpError } = await import("../../src/http/errors");
+    return () => new HttpError(status, code, "lỗi thử");
+  };
+
+  for (const [label, setup] of [
+    ["kho ảnh thiếu bucket (503 STORAGE_BUCKET_MISSING)", async () => {
+      uploadFailAt = 0;
+      uploadError = await httpErr(503, "STORAGE_BUCKET_MISSING");
+    }],
+    ["Storage trả 5xx (503 STORAGE_UNAVAILABLE)", async () => {
+      uploadFailAt = 1; // ảnh thẻ đã lên, chân dung lỗi
+      uploadError = await httpErr(503, "STORAGE_UNAVAILABLE");
+    }],
+    ["OCR không nạp được (503 OCR_UNAVAILABLE)", async () => {
+      decodeError = await httpErr(503, "OCR_UNAVAILABLE");
+    }],
+  ] as const) {
+    it(`${label} → HOÀN lượt: remainingAttempts vẫn 6; bộ đếm 6/giờ về 0, trần tổng vẫn tính 1`, async () => {
+      const { code, id } = await fresh();
+      await setup();
+      const res = await submit(code);
+      expect(res.status).toBe(503);
+      expect((await readJson(res)).error.remainingAttempts).toBe(6);
+      expect(await counter(`card:${id}`)).toBe(0);
+      expect(await counter(`card-total:${id}`)).toBe(1);
+      uploadError = () => new Error("Upload thất bại (500)");
+    });
+  }
+
+  it("lỗi 500 không phân loại (unhandled) → KHÔNG hoàn: lượt sau còn 4", async () => {
+    const { code, id } = await fresh();
+    uploadFailAt = 0; // uploadError mặc định: Error thường → 500
+    const res = await submit(code);
+    expect(res.status).toBe(500);
+    expect(JSON.stringify(await readJson(res))).not.toMatch(/remainingAttempts/);
+    expect(await counter(`card:${id}`)).toBe(1);
+    uploadFailAt = null;
+    nextDecode = { decoded: null, text: "" }; // lượt 2: UNREADABLE (lỗi của ảnh, có tính lượt)
+    const second = await readJson(await submit(code));
+    expect(second.error).toMatchObject({ code: "UNREADABLE", remainingAttempts: 4 });
+  });
+
+  it("trần tổng 20 lượt/giờ tính cả lượt được hoàn: đã 19 lượt → lượt 20 được xử lý (còn 0), lượt 21 → 429 dù bộ đếm 6/giờ = 0", async () => {
+    const { code, id } = await fresh();
+    await q(`insert into rate_limits (key, count, window_start) values ($1, 19, now())`, [`card-total:${id}`]);
+    uploadFailAt = 0;
+    uploadError = await httpErr(503, "STORAGE_BUCKET_MISSING");
+    const twentieth = await submit(code);
+    expect(twentieth.status).toBe(503);
+    expect((await readJson(twentieth)).error.remainingAttempts).toBe(0);
+    expect(await counter(`card:${id}`)).toBe(0);
+    const blocked = await submit(code);
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get("Retry-After")).toBeTruthy();
+    expect((await readJson(blocked)).error.remainingAttempts).toBe(0);
+    uploadError = () => new Error("Upload thất bại (500)");
+  });
+
+  it("lỗi của ảnh (422) vẫn tính lượt như cũ: remainingAttempts = min(6 − lượt, 20 − tổng)", async () => {
+    const { code, id } = await fresh();
+    await q(`insert into rate_limits (key, count, window_start) values ($1, 17, now())`, [`card-total:${id}`]);
+    nextDecode = { decoded: null, text: "" };
+    const r = await readJson(await submit(code));
+    expect(r.error).toMatchObject({ code: "UNREADABLE", remainingAttempts: 2 }); // min(6−1, 20−18)
   });
 });
 
@@ -370,6 +506,8 @@ describe("POST /api/student/card — đăng ký thẻ", () => {
     const card = await liveCard("H");
     expect(card.review_reasons).toEqual(["NAME_MISMATCH"]);
     expect(card.name_matched).toBe(false);
+    // dòng họ tên đọc bằng OCR được lưu để giảng viên đối chiếu (không phải dữ liệu sinh trắc)
+    expect((await q<{ ocr_name: string | null }>(`select ocr_name from student_cards where id=$1`, [card.id]))[0].ocr_name).toBe("NGUYỄN VĂN TÈO");
   });
 
   it("6 lượt/giờ/SV; mỗi lỗi kèm remainingAttempts giảm dần; lượt 7 → 429 với remainingAttempts 0 + Retry-After", async () => {
@@ -521,7 +659,15 @@ describe("giảng viên/admin: xem, duyệt, đặt lại thẻ (FR-049, T061)",
       cardUrl: expect.stringContaining("/cards/"),
     });
     expect(card.duplicateOf.similarity).toBeGreaterThanOrEqual(0.6);
+    expect(card).toMatchObject({ rosterName: "Hoàng Thị Giang", ocrName: null, liveSimilarity: expect.any(Number) });
+    // không có chữ OCR (OCR lỗi / không đọc được) → họ tên CHƯA được kiểm: cờ cho giảng viên
+    expect(card.nameUnverified).toBe(true);
     expect(JSON.stringify(card)).not.toMatch(/embedding/);
+  });
+
+  it("thẻ NAME_MISMATCH: giảng viên thấy dòng họ tên OCR cạnh họ tên trong danh sách", async () => {
+    const { card } = await readJson(await staffReq("gv1", "H", ""));
+    expect(card).toMatchObject({ reviewReasons: ["NAME_MISMATCH"], ocrName: "NGUYỄN VĂN TÈO", rosterName: "Bùi Thanh Hương", nameUnverified: false });
   });
 
   it("giảng viên không dạy SV đó → 404 cho xem / duyệt / đặt lại (chống IDOR)", async () => {
@@ -549,6 +695,10 @@ describe("giảng viên/admin: xem, duyệt, đặt lại thẻ (FR-049, T061)",
     );
     expect(c).toEqual({ status: "deleted", emb: true, p: null });
     expect(removed.flatMap((r) => r.paths).some((p) => p.startsWith(`${ids.H}/`))).toBe(true);
+    // SV thấy "bị từ chối" — không kèm lý do / ghi chú của giảng viên
+    const mine = await readJson(await myCard(json("/api/student/card", cookie.H, undefined, "GET"), NO_PARAMS));
+    expect(mine.card).toMatchObject({ status: "rejected" });
+    expect(JSON.stringify(mine)).not.toMatch(/NAME_MISMATCH|Tên không khớp|reason|note/i);
   });
 
   it("admin đặt lại thẻ: thẻ cũ → replaced (giữ lịch sử, xoá dữ liệu sinh trắc), audit + security_events card_replaced, SV đăng ký lại được", async () => {
@@ -560,6 +710,9 @@ describe("giảng viên/admin: xem, duyệt, đặt lại thẻ (FR-049, T061)",
     await new Promise((r) => setTimeout(r, 50));
     expect(await q(`select 1 from security_events where type='card_replaced' and actor_id=$1`, [ids.admin])).toHaveLength(1);
     expect(removed.flatMap((r) => r.paths).some((p) => p.startsWith(`${ids.A}/`))).toBe(true);
+    const mine = await readJson(await myCard(json("/api/student/card", cookie.A, undefined, "GET"), NO_PARAMS));
+    expect(mine.card).toMatchObject({ status: "reset" });
+    expect(JSON.stringify(mine)).not.toMatch(/SV được cấp thẻ mới/);
 
     scenario("231230801", 11);
     expect((await readJson(await submit("A"))).status).toBe("active");
@@ -601,5 +754,148 @@ describe("hạn giữ ảnh thẻ cập nhật theo lớp (FR-054, T064)", () =>
     await updateClass(gv1(), ids.K1, { endDate: newEnd });
     expect(await purgeOf("F")).toBe(purgeFor(newEnd));
     expect(await purgeOf("G")).toBe(purgeFor(K2_END)); // K2 vẫn muộn hơn
+  });
+});
+
+describe("GET /api/classes/{id}/cards — danh sách SV + trạng thái thẻ cho giảng viên (T063)", () => {
+  const list = (who: string, cls: string) => classCards(json(`/api/classes/${ids[cls]}/cards`, cookie[who], undefined, "GET"), params({ id: ids[cls] }));
+
+  it("giảng viên lớp khác → 404; admin xem được", async () => {
+    expect((await list("gv2", "K1")).status).toBe(404);
+    expect((await list("admin", "K1")).status).toBe(200);
+  });
+
+  it("mỗi SV đang học có trạng thái thẻ; lý do chờ duyệt chỉ ở thẻ pending_review; không có ảnh/embedding", async () => {
+    await q(`insert into student_cards (student_id, decoded_code, decode_method, status, review_reasons, live_similarity)
+             values ($1, '231230809', 'barcode', 'pending_review', '["LIVE_MISMATCH"]'::jsonb, 0.31)`, [ids.O]);
+    const fresh = (await q<{ id: string }>(`insert into students (student_code,last_name,first_name) values ('231230899','Vũ Minh','Quân') returning id`))[0].id;
+    await q(`insert into enrollments (class_id, student_id) values ($1,$2)`, [ids.K1, fresh]);
+    const res = await list("gv1", "K1");
+    expect(res.status).toBe(200);
+    const { students } = await readJson(res);
+    const by = Object.fromEntries(students.map((s: { code: string }) => [s.code, s]));
+    expect(by["231230809"]).toMatchObject({ studentId: ids.O, fullName: "Ngô Thị Linh", card: { status: "pending_review", reviewReasons: ["LIVE_MISMATCH"] } });
+    expect(by["231230802"].card).toMatchObject({ status: "active", reviewReasons: [] });
+    expect(by["231230808"].card).toMatchObject({ status: "rejected" }); // H bị từ chối ở trên
+    expect(by["231230899"].card).toBeNull(); // SV mới chưa có thẻ
+    expect(by["231230804"]).toBeUndefined(); // D học lớp K2
+    expect(JSON.stringify(students)).not.toMatch(/embedding|cards\/|https?:/);
+  });
+});
+
+describe("GET /api/student/classes — lớp của SV (T062)", () => {
+  it("chỉ lớp đang ghi danh active và chưa kết thúc; không có lớp người khác", async () => {
+    const ended = (await q<{ id: string }>(`insert into classes (instructor_id, code, course_name, start_date, end_date, default_room) values ($1,'CU','HP cũ',$2,$3,'P1') returning id`, [ids.gv1, daysFromToday(-200), daysFromToday(-100)]))[0].id;
+    const left = (await q<{ id: string }>(`insert into classes (instructor_id, code, course_name, start_date, end_date) values ($1,'RUT','HP rút',$2,$3) returning id`, [ids.gv1, daysFromToday(-10), daysFromToday(50)]))[0].id;
+    const s = (await q<{ id: string }>(`insert into students (student_code,last_name,first_name) values ('231230898','Trịnh Văn','Sơn') returning id`))[0].id;
+    await q(`insert into enrollments (class_id, student_id, status) values ($1,$4,'active'), ($2,$4,'active'), ($3,$4,'withdrawn')`, [ids.K1, ended, left, s]);
+    cookie.S = `${SESSION_COOKIE}=${(await createSession(s, "student")).token}`;
+    await consent("S");
+    const res = await myClasses(json("/api/student/classes", cookie.S, undefined, "GET"), NO_PARAMS);
+    expect(res.status).toBe(200);
+    const { classes } = await readJson(res);
+    expect(classes).toEqual([{ classId: ids.K1, code: "K1", courseName: "HP", room: null, openWindow: null }]);
+  });
+});
+
+describe("công cụ so sánh yaw client ↔ server — CHỈ preview/dev; production không trả", () => {
+  beforeAll(async () => {
+    await consent("Y");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+  const setEnv = (vercelEnv: "preview" | "production") => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", vercelEnv);
+  };
+  async function nonceBody(who: string) {
+    const body = await readJson(await cardNonce(json("/api/student/card/nonce", cookie[who]), NO_PARAMS));
+    lastChallenge = body.challenge;
+    return body;
+  }
+  async function submitYaw(who: string, clientYaw: string) {
+    liveFrameNo = 0;
+    const { nonce } = await nonceBody(who);
+    return uploadCard(await multipart(cookie[who], { nonce, image: await photo(), frames: selfies, clientYaw }), NO_PARAMS);
+  }
+  const resetY = () => q(`update student_cards set status='replaced' where student_id=$1`, [ids.Y]);
+
+  it("production: nonce không có yawDebug; lỗi liveness và 201 không kèm yawDebug dù client gửi clientYaw", async () => {
+    setEnv("production");
+    expect(await nonceBody("Y")).not.toHaveProperty("yawDebug");
+    scenario("231230813", 31);
+    liveMode = "reverse";
+    const bad = await readJson(await submitYaw("Y", "[0.5,0,-0.5]"));
+    expect(bad.error.code).toBe("LIVENESS_FAILED");
+    expect(bad.error).not.toHaveProperty("yawDebug");
+    scenario("231230813", 31);
+    const ok = await submitYaw("Y", "[0.5,0,-0.5]");
+    expect(ok.status).toBe(201);
+    expect(await readJson(ok)).toEqual({ status: "active", decodedCode: "231230813" });
+    await resetY();
+  });
+
+  it("preview: nonce báo yawDebug=true; quay ngược → 422 kèm yaw server từng khung, yaw client, lý do; vẫn có remainingAttempts", async () => {
+    setEnv("preview");
+    expect((await nonceBody("Y")).yawDebug).toBe(true);
+    await q(`delete from rate_limits`);
+    scenario("231230813", 31);
+    liveMode = "reverse";
+    const res = await submitYaw("Y", "[0.5,0.01,-0.5]");
+    expect(res.status).toBe(422);
+    const { error } = await readJson(res);
+    expect(error.code).toBe("LIVENESS_FAILED");
+    expect(error.remainingAttempts).toBe(5);
+    const d = error.yawDebug;
+    expect(d.reason).toBe("LIVENESS_FAILED");
+    expect(d.frames).toHaveLength(3);
+    expect(d.frames.map((f: { clientYaw: number }) => f.clientYaw)).toEqual([0.5, 0.01, -0.5]);
+    expect(d.frames.map((f: { expected: string }) => f.expected)).toEqual([lastChallenge[0], "center", lastChallenge[1]]);
+    expect(d.frames.map((f: { ok: boolean }) => f.ok)).toEqual([false, true, false]);
+    expect(d.frames.every((f: { serverYaw: unknown }) => typeof f.serverYaw === "number")).toBe(true);
+    expect(d.thresholds.server).toEqual({ centerMax: 0.18, turnMin: 0.22, turnMax: 0.8 });
+    expect(uploads).toHaveLength(0);
+  });
+
+  it("preview: 3 khung không cùng người → SV vẫn thấy LIVENESS_FAILED, yawDebug.reason = SAME_PERSON_FAILED (tư thế đều ok)", async () => {
+    setEnv("preview");
+    scenario("231230813", 31);
+    let n = 0;
+    const realLive = fakeDeps.analyzeLive;
+    fakeDeps.analyzeLive = async (img) => {
+      const r = await realLive(img);
+      const k = n++;
+      return { ...r, embed: async () => (k === 2 ? faceVector(98) : nextEmbedding) };
+    };
+    try {
+      const { error } = await readJson(await submitYaw("Y", "junk"));
+      expect(error.code).toBe("LIVENESS_FAILED");
+      expect(error.yawDebug.reason).toBe("SAME_PERSON_FAILED");
+      expect(error.yawDebug.frames.every((f: { ok: boolean; clientYaw: unknown }) => f.ok && f.clientYaw === null)).toBe(true);
+    } finally {
+      fakeDeps.analyzeLive = realLive;
+    }
+  });
+
+  it("preview: thẻ bị từ chối trước bước liveness → không có yawDebug (khung chưa được phân tích)", async () => {
+    setEnv("preview");
+    scenario("231239999", 31); // CODE_MISMATCH
+    const { error } = await readJson(await submitYaw("Y", "[0.5,0,-0.5]"));
+    expect(error.code).toBe("CODE_MISMATCH");
+    expect(error).not.toHaveProperty("yawDebug");
+  });
+
+  it("preview: đúng thử thách → 201 kèm yawDebug (reason null, 3 khung ok)", async () => {
+    setEnv("preview");
+    scenario("231230813", 31);
+    const res = await submitYaw("Y", "[0.45,-0.03,-0.44]");
+    expect(res.status).toBe(201);
+    const body = await readJson(res);
+    expect(body.status).toBe("active");
+    expect(body.yawDebug.reason).toBeNull();
+    expect(body.yawDebug.frames.map((f: { ok: boolean }) => f.ok)).toEqual([true, true, true]);
+    expect(body.yawDebug.frames.map((f: { clientYaw: number }) => f.clientYaw)).toEqual([0.45, -0.03, -0.44]);
+    await resetY();
   });
 });

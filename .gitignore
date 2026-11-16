@@ -50,3 +50,8 @@ playwright-report/
 
 # Cấu hình Claude Code riêng từng máy (skills dùng chung vẫn được commit)
 .claude/settings.local.json
+.local-storage/
+# Dữ liệu đọc thẻ chép lúc build (scripts/card-assets.mjs)
+card-assets/
+# MediaPipe tự host (tải/chép lúc build: models:download, scripts/card-assets.mjs)
+apps/web/public/mediapipe/

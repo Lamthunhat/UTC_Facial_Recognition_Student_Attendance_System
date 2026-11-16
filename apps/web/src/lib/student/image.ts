@@ -1,0 +1,119 @@
+/**
+ * Nén ảnh ở trình duyệt trước khi gửi (thuần — bộ mã hoá JPEG được truyền vào; trình duyệt dùng canvas,
+ * xem image-browser.ts). Giới hạn server: ảnh thẻ ≤ 1 MB, mỗi khung mặt ≤ 1 MB, tổng request ≤ 4 MB (FR-100, R14).
+ */
+export interface CompressSpec {
+  maxEdge: number;
+  maxBytes: number;
+  startQuality: number;
+  minQuality: number;
+}
+
+/** Ảnh thẻ: cạnh dài ~1600 px đủ cho mã vạch + OCR. */
+export const CARD_IMAGE: CompressSpec = { maxEdge: 1600, maxBytes: 1_000_000, startQuality: 0.85, minQuality: 0.5 };
+/** Khung mặt trực tiếp: ~720p; ngân sách nhỏ hơn 1 MB để 1 thẻ + 3 khung luôn ≤ 4 MB. */
+export const FACE_FRAME: CompressSpec = { maxEdge: 1280, maxBytes: 900_000, startQuality: 0.85, minQuality: 0.5 };
+
+export const REQUEST_MAX_BYTES = 4 * 1024 * 1024;
+/** Phần dư cho ranh giới multipart + trường nonce. */
+const MULTIPART_OVERHEAD = 16 * 1024;
+
+export type Encoder = (width: number, height: number, quality: number) => Promise<Blob>;
+
+export function fitWithin(width: number, height: number, maxEdge: number) {
+  const k = Math.min(1, maxEdge / Math.max(width, height));
+  return { width: Math.round(width * k), height: Math.round(height * k) };
+}
+
+/** Thử giảm chất lượng trước, rồi thu nhỏ 20 % mỗi vòng; không vừa sau 5 vòng → IMAGE_TOO_LARGE. */
+export async function compressImage(
+  source: { width: number; height: number },
+  spec: CompressSpec,
+  encode: Encoder,
+): Promise<{ blob: Blob; width: number; height: number; quality: number }> {
+  const qualities: number[] = [];
+  for (let q = spec.startQuality; q >= spec.minQuality - 1e-9; q -= 0.1) qualities.push(Math.round(q * 100) / 100);
+  let edge = spec.maxEdge;
+  for (let round = 0; round < 5; round++) {
+    const { width, height } = fitWithin(source.width, source.height, edge);
+    for (const quality of qualities) {
+      const blob = await encode(width, height, quality);
+      if (blob.size <= spec.maxBytes) return { blob, width, height, quality };
+    }
+    edge = Math.round(edge * 0.8);
+  }
+  throw new Error("IMAGE_TOO_LARGE");
+}
+
+export function requestFits(sizes: number[]): boolean {
+  return sizes.reduce((a, b) => a + b, 0) + MULTIPART_OVERHEAD <= REQUEST_MAX_BYTES;
+}
+
+/** Thẻ SV UTC là thẻ DỌC theo chuẩn CR80 (54 × 85,6 mm): rộng / cao. */
+export const CARD_ASPECT = 54 / 85.6;
+/** Cạnh dài tối thiểu của vùng thẻ cắt ra (điểm ảnh gốc của camera) — thấp hơn thì OCR/mã vạch khó đọc. */
+export const CARD_MIN_LONG_EDGE = 1000;
+
+/**
+ * Khung hướng dẫn thẻ dọc trong vùng xem trước (toạ độ màn hình): cao 80 % vùng xem, đúng tỉ lệ CR80, căn giữa;
+ * vùng xem quá hẹp thì thu theo chiều ngang (≤ 92 % chiều rộng). Dùng chung cho điện thoại dọc và webcam ngang.
+ */
+export function cardGuideRect(viewW: number, viewH: number) {
+  let height = viewH * 0.8;
+  let width = height * CARD_ASPECT;
+  if (width > viewW * 0.92) {
+    width = viewW * 0.92;
+    height = width / CARD_ASPECT;
+  }
+  return { x: (viewW - width) / 2, y: (viewH - height) / 2, width, height };
+}
+
+export function cropLongEdgeOk(crop: { width: number; height: number }, min = CARD_MIN_LONG_EDGE) {
+  return Math.max(crop.width, crop.height) >= min;
+}
+
+/** Dưới ngưỡng này không gửi (mã vạch/OCR gần như chắc chắn hỏng) — research R3. */
+export const CARD_BLOCK_LONG_EDGE = 500;
+
+/** Cạnh dài vùng thẻ cắt ra (điểm ảnh gốc): < 500 chặn · 500–999 cảnh báo, cho dùng · ≥ 1000 ổn. */
+export function cardCropVerdict(longEdge: number): "ok" | "warn" | "block" {
+  if (longEdge < CARD_BLOCK_LONG_EDGE) return "block";
+  return longEdge < CARD_MIN_LONG_EDGE ? "warn" : "ok";
+}
+
+type Size = { width: number; height: number };
+
+/** Hai khung cùng tỉ lệ (sai lệch tương đối ≤ tol) — ảnh takePhoto chỉ dùng được khi cùng góc nhìn với video. */
+export function aspectsMatch(a: Size, b: Size, tol = 0.02) {
+  const ra = a.width / a.height;
+  const rb = b.width / b.height;
+  return Math.abs(ra - rb) / ra <= tol;
+}
+
+/** Vùng cắt theo toạ độ video → toạ độ ảnh chụp (cùng tỉ lệ). */
+export function scaleRegion(r: { x: number; y: number; width: number; height: number }, from: Size, to: Size) {
+  const k = to.width / from.width;
+  return { x: Math.round(r.x * k), y: Math.round(r.y * k), width: Math.round(r.width * k), height: Math.round(r.height * k) };
+}
+
+/**
+ * Khung hướng dẫn vẽ trên màn hình (video `object-fit: cover`) → vùng cắt tương ứng trên ảnh gốc của video,
+ * nới thêm `margin` (tỉ lệ) mỗi phía để không cắt sát mép thẻ; kẹp trong ảnh.
+ */
+export function guideCrop(
+  v: { videoW: number; videoH: number; viewW: number; viewH: number },
+  rect: { x: number; y: number; width: number; height: number },
+  margin = 0.06,
+) {
+  const scale = Math.max(v.viewW / v.videoW, v.viewH / v.videoH);
+  const offX = (v.videoW * scale - v.viewW) / 2;
+  const offY = (v.videoH * scale - v.viewH) / 2;
+  const mx = rect.width * margin;
+  const my = rect.height * margin;
+  const clamp = (n: number, max: number) => Math.min(max, Math.max(0, n));
+  const x1 = clamp((rect.x - mx + offX) / scale, v.videoW);
+  const y1 = clamp((rect.y - my + offY) / scale, v.videoH);
+  const x2 = clamp((rect.x + rect.width + mx + offX) / scale, v.videoW);
+  const y2 = clamp((rect.y + rect.height + my + offY) / scale, v.videoH);
+  return { x: Math.round(x1), y: Math.round(y1), width: Math.round(x2 - x1), height: Math.round(y2 - y1) };
+}

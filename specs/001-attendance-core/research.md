@@ -26,12 +26,43 @@ Mỗi mục theo dạng: Quyết định · Lý do · Phương án đã cân nh�
 - **Giới hạn đã biết**: không chống được mặt nạ 3D hay deepfake thời gian thực bơm vào camera ảo; chấp nhận cho phạm vi đồ án.
 - **Dùng cả khi đăng ký thẻ (FR-045a)**: cùng thử thách + 3 khung; khung nhìn thẳng so với chân dung thẻ. Lý do: chỉ chụp thẻ thì ai cầm được thẻ người khác (mượn, nhặt) cũng đăng ký được. Mặt trực tiếp lệch chân dung → hàng chờ `LIVE_MISMATCH` cho giảng viên, không từ chối (ảnh thẻ có thể cũ). Ngưỡng dùng `CARD_ACCEPT_ABOVE` như khi điểm danh. Quy ước yaw: ảnh camera trước gửi lên KHÔNG lật; SV quay trái → mũi lệch phải ảnh. Ngưỡng tư thế sơ bộ: nhìn thẳng |yaw| ≤ 0,12, quay ≥ 0,20; cùng người: cosine ≥ 0,5 — hiệu chỉnh ở T011.
 
+- **Hướng dẫn quay đầu ở trình duyệt (2026-11-16)**: MediaPipe **Face Detector — BlazeFace short-range** (`@mediapipe/tasks-vision` 1.2.0, model `blaze_face_short_range` float16, Apache-2.0), thay Face Landmarker (nặng hơn, khởi tạo ~5,2 s). Yaw dùng **chung một công thức** cho client và server (`@utc/shared/face-yaw`) — xem mục "Thang yaw mới" dưới đây. Tự chụp khi đạt góc liên tục ~300 ms; quá 10 s/khung → nhắc lại + nút "Chụp theo đếm ngược"; model không tải được (hoặc > 15 s) → đếm ngược. **Client chỉ hướng dẫn — server quyết định** (`checkLiveFrames`).
+  - **Thang yaw mới (2026-11-16, sau thử thật iPhone)**: công thức cũ chia cho **khoảng cách 2 mắt** (≈ cos θ → 0 khi quay mạnh) → nhìn thẳng ổn (0,00–0,06) nhưng quay mạnh ra -3,95 / 7,06 / min -41,12 và **đổi dấu** cùng một hướng quay. Công thức mới: **yaw = kẹp(5 × (mũi.x − tâm 2 mắt.x) / bề rộng bbox mặt, −1, 1)** — hiệu mũi − tâm mắt ≈ (d_mũi − d_mắt)·sin θ đơn điệu, bề rộng bbox gần như không đổi khi quay; ≈ sin θ ở góc nhỏ. Test với mô hình đầu tổng hợp (`@utc/shared/head-model`) quay -80°…+80°: đơn điệu, không đổi dấu, trong [-1, 1] — cho cả SCRFD 5 điểm (server) và BlazeFace 6 điểm (client).
+  - **Ngưỡng theo thang mới (sơ bộ — hiệu chỉnh bằng mặt thật ở `/sv/the-sinh-vien/debug`)**:
+
+    | | Nhìn thẳng | Quay hợp lệ | Quá mạnh |
+    |---|---|---|---|
+    | Server `SERVER_YAW` | ≤ 0,18 (~10°) | **0,22**–0,80 (~13°–72°; trước 2026-11-17: 0,30 ~18°) | > 0,80 → không phải khung quay hợp lệ → `LIVENESS_FAILED` |
+    | Client `CLIENT_YAW` (chặt hơn ở cả 3 mốc) | ≤ 0,12 (~7°) | 0,40–0,65 (~25°–48°) | > 0,65 → "Quay vừa phải" |
+
+    Góc trong ngoặc theo mô hình đầu (đầu elip rộng 1, sâu 1,2; mũi nhô 0,2 so với mắt) — người thật khác mô hình nên cần đo. Hai bộ ngưỡng nằm **một chỗ**: `@utc/shared/face-yaw-thresholds` (client, server, yaw-debug, trang chẩn đoán đều import từ đó).
+  - **Hiệu chỉnh 2026-11-17 — số đo iPhone thật** ("Thử liveness (không tốn lượt)", Vercel Preview, iOS Safari), yaw client C (MediaPipe lúc tự chụp) / server S (SCRFD trên cùng khung) — lượt 1 trong bảng 4 lượt bên dưới: trái 0,501 / 0,552 · thẳng −0,088 / −0,093 · phải −0,410 / −0,321.
+    Ở chiều quay, server có thể đo **thấp hơn client ~0,09** về độ lớn (một chiều cao hơn, chiều kia thấp hơn — có thể do mặt/ánh sáng không đối xứng). Với ngưỡng cũ, SV quay vừa đủ theo client (0,40) có thể ra server 0,31 — sát mốc 0,30, chỉ còn 0,01 → `LIVENESS_FAILED` oan (đúng như lỗi đã gặp). **Chọn server `turnMin` = 0,22** (~13° theo mô hình đầu): biên tới mốc client 0,18 ≈ 2× độ lệch đo được; vẫn có vùng đệm 0,04 trên mốc thẳng 0,18 nên khung nhìn thẳng (|S| ~0,09) không thể bị nhận là quay. Hạ thấp hơn nữa thì vùng đệm thẳng/quay mất; client không đổi (0,40 vẫn dễ đạt khi có hướng dẫn trực tiếp). Chống giả mạo bằng ảnh tĩnh không dựa vào độ lớn góc mà vào chuỗi thử thách ngẫu nhiên + cùng một người, nên nới 0,30 → 0,22 không làm yếu đáng kể.
+  - **Công thức biên an toàn** (`YAW_MARGINS`, `yawMarginViolations`; test bất biến `packages/shared/tests/face-yaw-thresholds.test.ts` — sửa ngưỡng sai biên thì test fail): `client.turnMin − server.turnMin ≥ 0,15` (≥ độ lệch đo được 0,09 + dư) · `server.centerMax − client.centerMax ≥ 0,05` · `server.turnMax − client.turnMax ≥ 0,10` · `server.centerMax < server.turnMin < server.turnMax` (không chồng lấn). Hiện tại: 0,18 · 0,06 · 0,15 · 0,18 < 0,22 < 0,80. Còn chờ: đo thêm (Android, nhiều người, ánh sáng khác) trong T011.
+  - **Kiểm chứng sau khi hạ ngưỡng — 4 lượt "Thử liveness" trên iPhone** (người dùng báo, 2026-11-17; iOS 18.4 Safari, Preview `ffeceb2`, server quay ≥ 0,22). Lượt 1 đo trên bản trước khi hạ ngưỡng (chính là số đo dẫn tới quyết định ở trên). Cặp số C / S; Δ = |S| − |C|:
+
+    | Lượt | Thử thách | Khung quay 1 (C / S, Δ) | Thẳng (C / S, Δ) | Khung quay 2 (C / S, Δ) | Kết quả |
+    |---|---|---|---|---|---|
+    | 1 | trái → phải | trái 0,501 / 0,552 (+0,051) | −0,088 / −0,093 (+0,005) | phải −0,410 / −0,321 (**−0,089**) | QUA |
+    | 2 | trái → phải | trái 0,526 / 0,526 (0,000) | 0,081 / 0,047 (−0,034) | phải −0,439 / −0,408 (−0,031) | QUA |
+    | 3 | trái → phải | trái 0,405 / 0,493 (+0,088) | −0,053 / −0,033 (−0,020) | phải −0,638 / −0,587 (−0,051) | QUA |
+    | 4 | phải → trái | phải −0,550 / −0,534 (−0,016) | 0,048 / 0,014 (−0,034) | trái 0,435 / 0,422 (−0,013) | QUA |
+
+    Tổng hợp 8 khung quay: **|S − C| ≤ 0,089** (dấu lệch không cố định: lớn nhất +0,088 trái lượt 3, −0,089 phải lượt 1); |S| nhỏ nhất 0,321 → còn ≥ 0,10 trên mốc server 0,22; |C| nhỏ nhất 0,405 (client tự chụp ngay khi chạm 0,40), lớn nhất 0,638 (sát trần client 0,65). 4 khung thẳng: |S| ≤ 0,093, |S − C| ≤ 0,034 — xa mốc 0,18. **Kết luận: biên 0,18 (client 0,40 − server 0,22) đủ cho iPhone**, gấp ~2 lần độ lệch lớn nhất đo được. Giới hạn: 1 thiết bị, 1 người, 1 điều kiện ánh sáng → **T011 vẫn mở**, còn thiếu Android (camera + hiệu năng MediaPipe khác) và nhiều người hơn.
+  - **Tự host + cache**: `public/mediapipe/tasks-vision-1.2.0/` (wasm, chép từ `node_modules`) và `public/mediapipe/blaze_face_short_range.<sha256[0:12]>.tflite` (tải bằng `pnpm models:download`), đều kiểm sha256; tên có phiên bản/hash → `Cache-Control: public, max-age=31536000, immutable`. Đường dẫn khai báo một chỗ (`apps/web/src/lib/student/mediapipe-assets.ts`, có test đối chiếu script build).
+  - **CSP theo khu**: `'wasm-unsafe-eval'` cho **toàn khu SV đã đăng nhập `/sv/*`** (thẻ, chẩn đoán, sau này check-in) — `needsWasm()` trong `security/headers.ts`. Trước đó chỉ ở `/sv/the-sinh-vien` và phải tải lại document khi vào/ra (`AppLink`) vì CSP gắn với document (`next/link` giữ CSP cũ → wasm bị chặn, đã gặp khi thử). Nay cả khu một chính sách → `next/link` bình thường; chỉ đăng nhập SV (`/sv` → `/sv/*`) và đăng xuất tải document mới. `/sv` (đăng nhập), `/gv`, `/admin`, `/login`, `/api` giữ CSP chặt. Đánh đổi: các trang SV không dùng wasm cũng được biên dịch WebAssembly — chấp nhận vì `'wasm-unsafe-eval'` không mở `eval` JS và script vẫn bị `nonce` + `strict-dynamic` chặn.
+  - **Tải thêm** (chỉ khi tới bước khuôn mặt, tải sẵn từ màn giới thiệu): chunk JS ~155 KB (gzip ~45 KB) + `vision_wasm_internal.js` 334 KB + wasm **14,5 MB** (máy không SIMD: bản nosimd 12,9 MB) + model **0,23 MB** → **~15,0 MB sau giải nén, ~4,4 MB qua mạng** khi máy chủ nén gzip (đo trên `next start` cục bộ: `.wasm` trả `content-encoding: gzip`). Phần lớn là wasm — dùng chung cho mọi tác vụ tasks-vision, đổi model không giảm được. Lần sau lấy từ cache (immutable).
+  - **Khởi tạo** (tải + biên dịch wasm + nạp model), Chrome headless, localhost, máy dev: **~1,3 s**. Trên điện thoại + 4G **chưa đo**; Vercel có nén `.wasm` hay không **chưa kiểm** (Preview cần bypass).
+
 ## R3. Đọc thẻ sinh viên 🧪
 
 - **Quyết định**: (1) Đọc **mã vạch** trên thẻ bằng `zxing-wasm` ở server; (2) nếu không đọc được, OCR dòng "Mã sinh viên" bằng `tesseract.js` (chỉ nhận chữ số); (3) phát hiện khuôn mặt trên ảnh thẻ bằng SCRFD và cắt ảnh chân dung để trích vector tham chiếu.
 - **Lý do**: Mã vạch đọc ổn định hơn OCR; OCR làm phương án dự phòng. Cả hai chạy trong Node không cần dịch vụ ngoài.
 - **Cần xác minh**: mã vạch trên thẻ UTC có mã hoá đúng mã sinh viên không (kiểm bằng vài thẻ thật trong spike). Nếu không, OCR là đường chính.
-- **Chống ảnh có sẵn**: trang đăng ký chỉ mở camera trực tiếp (không có input file); ảnh gửi kèm nonce có hạn 2 phút.
+- **Chống ảnh có sẵn**: trang đăng ký chỉ mở camera trực tiếp (không có input file, không có `<input capture>` — kể cả trên điện thoại); ảnh gửi kèm nonce có hạn 2 phút. Mở trong webview (Zalo, Facebook, Messenger, Instagram, TikTok, WebView Android) → hướng dẫn mở bằng Chrome/Safari vì camera thường bị chặn.
+- **Thẻ SV UTC là thẻ DỌC** (CR80 54 × 85,6 mm): khung hướng dẫn dọc cao 80 % vùng xem trước; ảnh gửi = vùng cắt theo khung. Chụp bằng `ImageCapture.takePhoto` khi trình duyệt hỗ trợ và ảnh cùng tỉ lệ với luồng video (độ phân giải cảm biến); ngược lại lấy khung video (xin 2560×1440).
+- **Ngưỡng kích thước ảnh thẻ** (cạnh dài vùng cắt, điểm ảnh gốc): **< 500 px chặn** ("quá nhỏ — dùng camera điện thoại"); **500–999 px cảnh báo** "Ảnh hơi nhỏ, nên dùng camera điện thoại" + "Vẫn dùng ảnh này"; **≥ 1000 px** dùng luôn. Kích thước vùng cắt phụ thuộc độ phân giải camera, không phụ thuộc khoảng cách thẻ (vùng cắt luôn là khung hướng dẫn): webcam 720p ~620 px (cảnh báo), luồng dọc điện thoại 1080×1920 ~1240 px. Ngưỡng sơ bộ — hiệu chỉnh cùng T010 trên thẻ thật.
+- **Đọc thẻ ở server**: zxing `tryRotate` + `tryInvert` (mã vạch ngang hay dọc đều đọc được); OCR lần đầu chạy song song với mã vạch; **chỉ khi không đọc được mã vạch** mới OCR lại với ảnh xoay 90°, rồi 270° (tối đa 3 lượt OCR). Mọi lần thử trong một request vẫn tính **1 lượt** đăng ký (6 lượt/giờ). Ở dev, log `card_register_timing` ghi thời gian từng bước (sanitize, đọc thẻ + chân dung, liveness, so khớp, lưu) và số lần OCR xoay.
 - **Ngưỡng trùng mặt 1:N (`DUPLICATE_ABOVE`)**: mặc định **0,45 — chờ hiệu chỉnh T011** (bộ ảnh thử ≥ 20 người). Hạ từ 0,6 vì ảnh in trên thẻ (cũ, chụp lại) cho độ tương đồng thấp hơn ảnh chụp trực tiếp; ngưỡng thấp chỉ làm nhiều thẻ vào hàng chờ duyệt hơn, không chặn sinh viên.
 - **Ngưỡng chân dung trên thẻ** (`PORTRAIT_RULES`): cạnh mặt tối thiểu 40 px, độ nét tối thiểu 0,02 — sơ bộ; hiệu chỉnh bằng `pnpm --filter @utc/backend calibrate:card <thư mục ảnh>` trên ảnh thẻ thật (chạy cục bộ, không lưu ảnh, không gửi đi đâu).
 - **Phương án đã cân nhắc**: Google Vision OCR (gửi dữ liệu ra ngoài, tốn phí); để giảng viên nhập tay (chậm, không chặn được thẻ người khác).
@@ -139,3 +170,28 @@ Mỗi mục theo dạng: Quyết định · Lý do · Phương án đã cân nh�
 - Thời gian đọc: 45 ms (ảnh xám + tăng tương phản), 180–210 ms (ảnh gốc/phóng to).
 - `zxing-wasm` mặc định tải wasm từ CDN → phải nạp `zxing_reader.wasm` từ `node_modules` qua `prepareZXingModule({ overrides: { wasmBinary } })` và đính kèm file vào function.
 - **Còn thiếu**: thử thêm ≥ 4 thẻ khác (khoá khác, thẻ cũ/mờ).
+
+## Kết quả thử thật (2026-11-16, Vercel Preview + iPhone — T009/T010 phần 2)
+
+Người dùng tự thử: iPhone, **iOS 18.4 Safari**, Vercel Preview của PR #2 (sau khi sửa đóng gói `card-assets/`), **1 thẻ UTC thật** (thẻ dọc).
+
+**Luồng (US6)**
+- Đăng ký thẻ **thành công** (thẻ thật + mặt thật, thử thách quay đầu).
+- Quay sai hướng → `LIVENESS_FAILED`, lượt bị tính đúng.
+- Giảng viên đặt lại thẻ → SV thấy "Cần đăng ký lại" → đăng ký lại thành công.
+
+**Camera (R3 — số liệu từ `/sv/the-sinh-vien/debug`)**
+- Luồng camera sau: **1440×2560** (dọc); khả năng tối đa 4032×3024; `takePhoto`: **2160×3840**.
+- Vùng thẻ cắt theo khung dọc: **1046×1658** → cạnh dài ≥ 1000 px, qua ngưỡng "ổn" (không cảnh báo).
+
+**Thời gian trên Vercel (T009 — 1 mẫu mỗi loại, chưa rõ cold/warm)**
+
+| Request | Kết quả | Thời gian |
+|---|---|---|
+| `POST /api/student/card` | 201 (đăng ký thành công) | **6,84 s** |
+| `POST /api/student/card` | 422 `LIVENESS_FAILED` | 4,97 s |
+| `POST /api/admin/students/{id}/card/reset` | 200 | 1,57 s |
+
+- **Ngưỡng thời gian tách (2026-11-16, T012)**: **đăng ký thẻ p95 ≤ 10 s** — làm MỘT lần cho cả khoá, có màn tiến trình "Đang xử lý… (có thể mất ~10 giây)", gồm đọc thẻ (mã vạch + OCR) mà điểm danh không có; **điểm danh p95 ≤ 5 s** — mỗi buổi, nhiều SV cùng lúc (SC-002).
+- 201 = 6,84 s **trong ngưỡng 10 s của đăng ký thẻ** (1 mẫu — cần thêm mẫu cold/warm). 422 liveness = 4,97 s cho thấy phần nhận diện mặt + liveness (dùng chung với điểm danh) đang sát 5 s → T145 + đo điểm danh ở US2. Bộ nhớ function **chưa đo**.
+- Hướng tối ưu (task Polish T145): zxing thử ở kích thước nhỏ trước; bỏ OCR họ tên khi mã vạch đã đọc được hoặc chạy song song với nhận diện mặt; đo bộ nhớ.

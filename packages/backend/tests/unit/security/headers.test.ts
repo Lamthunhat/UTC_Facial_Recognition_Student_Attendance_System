@@ -1,11 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { buildCsp, isCsrfSafe, securityHeaders } from "../../../src/security/headers";
+import { buildCsp, isCsrfSafe, needsWasm, securityHeaders } from "../../../src/security/headers";
 
 describe("CSP (T028, FR-086)", () => {
   const csp = buildCsp({ nonce: "abc123", storageOrigin: "https://x.supabase.co" });
   it("chỉ cho script có nonce, không unsafe-inline/eval cho script", () => {
     expect(csp).toContain("script-src 'self' 'nonce-abc123' 'strict-dynamic'");
-    expect(csp).not.toMatch(/script-src[^;]*unsafe-(inline|eval)/);
+    // 'unsafe-eval' (eval JS) và 'unsafe-inline' bị cấm; 'wasm-unsafe-eval' CHỈ cho biên dịch WebAssembly
+    expect(csp).not.toMatch(/script-src[^;]*'unsafe-(inline|eval)'/);
+  });
+  it("mặc định KHÔNG cho biên dịch WebAssembly", () => {
+    expect(csp).not.toContain("wasm-unsafe-eval");
+  });
+  it("route nhận diện mặt: thêm 'wasm-unsafe-eval' (MediaPipe tự host), vẫn cấm unsafe-eval/inline", () => {
+    const w = buildCsp({ nonce: "abc123", wasm: true });
+    expect(w).toMatch(/script-src [^;]*'wasm-unsafe-eval'/);
+    expect(w).not.toMatch(/script-src[^;]*'unsafe-(inline|eval)'/);
+    // wasm + model tải từ chính origin (public/mediapipe) — không mở thêm nguồn ngoài
+    expect(csp).toContain("connect-src 'self'");
+    expect(csp).not.toMatch(/https:\/\/(cdn|storage\.googleapis)/);
   });
   it("chặn nhúng iframe, object, đổi base", () => {
     expect(csp).toContain("frame-ancestors 'none'");
@@ -54,4 +66,17 @@ describe("chống CSRF (FR-087)", () => {
     expect(
       isCsrfSafe({ ...base, method: "DELETE", origin: null, secFetchSite: "cross-site", hasSessionCookie: false }),
     ).toBe(false));
+});
+
+describe("needsWasm — 'wasm-unsafe-eval' cho TOÀN KHU SV /sv/* (nhận diện mặt ở trình duyệt)", () => {
+  it("mọi trang trong khu SV đã đăng nhập", () => {
+    for (const p of ["/sv/lop", "/sv/dong-y", "/sv/the-sinh-vien", "/sv/the-sinh-vien/debug", "/sv/lop/abc/diem-danh"]) {
+      expect(needsWasm(p), p).toBe(true);
+    }
+  });
+  it("trang đăng nhập SV /sv, khu GV/Admin, /login, API và tên gần giống → CSP chặt", () => {
+    for (const p of ["/", "/sv", "/svx", "/sv-abc", "/gv/lop", "/admin", "/admin/users", "/login", "/api/student/card", "/api/sv/x"]) {
+      expect(needsWasm(p), p).toBe(false);
+    }
+  });
 });

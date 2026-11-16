@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import { mkdir, writeFile, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { inflateRawSync } from "node:zlib";
+import { FACE_DETECTOR_MODEL_SHA256, FACE_DETECTOR_MODEL_SOURCE, FACE_DETECTOR_MODEL_URL } from "../apps/web/src/lib/student/mediapipe-assets";
 
 const ZIP_URL = "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_s.zip";
 const ZIP_SHA256 = "d85a87f503f691807cd8bb97128bdf7a0660326cd9cd02657127fa978bab8b5e";
@@ -72,7 +73,29 @@ function extractEntries(zip: Buffer, names: string[]): Map<string, Buffer> {
   return out;
 }
 
+/**
+ * MediaPipe Face Detector (BlazeFace short-range, float16) cho hướng dẫn quay đầu ở TRÌNH DUYỆT (chỉ hướng dẫn — server
+ * vẫn quyết định). Tự host trong apps/web/public (không CDN, CSP connect-src 'self'); tên file có hash → cache immutable.
+ * Đường dẫn + sha256 dùng chung với client (apps/web/src/lib/student/mediapipe-assets.ts). Giấy phép Apache-2.0.
+ */
+async function downloadFaceDetector() {
+  const dest = path.resolve(__dirname, "../apps/web/public", FACE_DETECTOR_MODEL_URL.slice(1));
+  const name = path.basename(dest);
+  if ((await readFile(dest).then(sha256, () => null)) === FACE_DETECTOR_MODEL_SHA256) {
+    console.log(`✔ ${name} đã có`);
+    return;
+  }
+  const res = await fetch(FACE_DETECTOR_MODEL_SOURCE);
+  if (!res.ok) throw new Error(`Tải ${name} thất bại: HTTP ${res.status}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (sha256(buf) !== FACE_DETECTOR_MODEL_SHA256) throw new Error(`Mã băm ${name} không khớp — dừng lại`);
+  await mkdir(path.dirname(dest), { recursive: true });
+  await writeFile(dest, buf);
+  console.log(`✔ ${name} (${(buf.length / 1e3).toFixed(0)} KB)`);
+}
+
 async function main() {
+  await downloadFaceDetector();
   if (await alreadyPresent()) {
     console.log(`✔ Model đã có trong ${OUT_DIR}`);
     return;

@@ -8,6 +8,9 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // Dữ liệu đọc thẻ (OCR vie, wasm zxing) ở thư mục cố định như lúc chạy thật — chép + kiểm sha256 trước khi test
+    globalSetup: ["./tests/support/card-assets-setup.ts"],
+    env: { CARD_ASSETS_DIR: fileURLToPath(new URL("../../apps/web/card-assets", import.meta.url)) },
     include: ["tests/**/*.test.ts"],
     testTimeout: 30_000,
     hookTimeout: 120_000,

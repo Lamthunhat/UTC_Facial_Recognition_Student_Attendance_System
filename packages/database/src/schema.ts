@@ -124,6 +124,8 @@ export const studentCards = pgTable(
     nameMatched: boolean("name_matched"),
     /** Cosine giữa khung mặt trực tiếp (nhìn thẳng) lúc đăng ký và chân dung thẻ — khung hình KHÔNG được lưu (FR-045a, FR-051). */
     liveSimilarity: real("live_similarity"),
+    /** Dòng họ tên OCR trên thẻ — chỉ lưu khi NAME_MISMATCH, để giảng viên đối chiếu với họ tên trong danh sách. */
+    ocrName: text("ocr_name"),
   },
   (t) => [
     uniqueIndex("one_live_card_per_student")

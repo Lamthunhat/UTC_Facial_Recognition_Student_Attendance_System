@@ -26,7 +26,7 @@ Biến bí mật đánh dấu **Sensitive**. Không biến nào được có ti�
 |---|---|---|---|---|
 | `DATABASE_URL` | Có | Prod + Preview | Supabase → Connect → **Transaction pooler** (port **6543**) → URI; thay `[YOUR-PASSWORD]` bằng mật khẩu DB | App dùng `prepare: false` (bắt buộc với transaction pooler). Nên dùng 2 project Supabase riêng cho Preview và Production |
 | `DB_POOL_MAX` | Không | Prod + Preview | Số nguyên | Kết nối tối đa mỗi instance, mặc định 3 |
-| `SUPABASE_URL` | Có | Prod + Preview | Supabase → Project Settings → API → Project URL | Chỉ dùng ở server |
+| `SUPABASE_URL` | Có | Prod + Preview | Supabase → Project Settings → API → Project URL | Chỉ dùng ở server. **Origin thuần** `https://<ref>.supabase.co` — không path, không `/` cuối; dán nhầm `…/rest/v1` (hay gặp khi chép từ mục API) → server không khởi động, log `env_invalid` `["SUPABASE_URL"]`. `http://` chỉ chấp nhận cho `localhost`/`127.0.0.1` (Supabase CLI) |
 | `SUPABASE_SERVICE_ROLE_KEY` | Có | Prod + Preview | Supabase → Project Settings → API keys → `service_role` (secret) | **Sensitive.** Toàn quyền DB/Storage — chỉ ở server, không bao giờ gửi về trình duyệt |
 | `JWT_SECRET` | Có | Prod + Preview | `openssl rand -base64 48` (hoặc `node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"`) | **Sensitive.** ≥ 32 ký tự. Khác nhau giữa Preview và Production (phiên preview không dùng được ở production). Đổi giá trị = đăng xuất mọi người |
 | `LOG_HMAC_SECRET` | Có | Prod + Preview | `openssl rand -base64 48` | **Sensitive.** ≥ 32 ký tự, **khác** `JWT_SECRET`. Khoá HMAC mã SV ghi trong `security_events` (nối các lần dò cùng một mã mà không lưu mã). Thiếu/ngắn → server không khởi động (xem dòng "Biến môi trường" ở §7). Giữ cố định: đổi giá trị = log cũ và mới không nối được với nhau (không ảnh hưởng phiên đăng nhập) |
@@ -95,6 +95,37 @@ on conflict (id) do nothing;
 
 Không tạo policy cho `anon`/`authenticated`: chỉ server (service role) đọc/ghi; trình duyệt nhận signed URL 5 phút.
 
+### Kiểm 4 bucket — làm cho **từng** project Supabase (Preview và Production nếu tách riêng)
+
+Thiếu bucket thì đăng ký thẻ lỗi 503 `STORAGE_BUCKET_MISSING`; log function có dòng `{"msg":"storage_bucket_missing","op":"upload","bucket":"cards","host":"<ref>.supabase.co",…}` — `host` cho biết đang nói tới project nào.
+
+**Cách 1 — SQL Editor của project đó** (không cần key). Kết quả phải đủ **4 dòng**, cột `public` đều `false`:
+
+```sql
+select b.id, b.public, b.file_size_limit, b.allowed_mime_types
+from (values ('cards'), ('evidence'), ('leave'), ('disputes')) as want(id)
+left join storage.buckets b on b.id = want.id
+order by want.id;
+-- dòng nào toàn NULL = bucket đó CHƯA tạo → chạy lại khối insert ở trên
+```
+
+**Cách 2 — từ máy, qua REST** (dùng service role key của đúng project đó; chỉ in tên bucket + public, **không in key**). PowerShell:
+
+```powershell
+# Đặt cho riêng phiên này, không ghi vào file
+$env:SB_URL = "https://<ref>.supabase.co"; $env:SB_KEY = "<service_role key của project này>"
+$h = @{ Authorization = "Bearer $env:SB_KEY"; apikey = $env:SB_KEY }
+$b = Invoke-RestMethod -Uri "$env:SB_URL/storage/v1/bucket" -Headers $h
+"cards","evidence","leave","disputes" | ForEach-Object { $x = $b | Where-Object id -eq $_; "{0,-9} {1}" -f $_, ($(if ($x) { "có, public=$($x.public)" } else { "THIẾU" })) }
+Remove-Item Env:SB_URL, Env:SB_KEY
+```
+
+Checklist mỗi project:
+
+- [ ] Đủ 4 bucket `cards`, `evidence`, `leave`, `disputes`; tất cả `public = false`.
+- [ ] `SUPABASE_URL` trên Vercel của môi trường đó (Preview / Production) trỏ đúng `<ref>` của project vừa kiểm.
+- [ ] Thử đăng ký thẻ (checklist §7): log không có `storage_bucket_missing` / `storage_request_failed`.
+
 ## 5. Tạo tài khoản Admin đầu tiên
 
 ```powershell
@@ -116,6 +147,10 @@ Chạy lại với cùng email = đặt lại mật khẩu và thu hồi mọi p
 4. Thêm biến môi trường theo §2 (Preview trỏ project Supabase thử nghiệm).
 5. Settings → Deployment Protection: bật cho Preview (chỉ thành viên team xem được).
 6. Deploy bản **Preview** trước (push nhánh `001-attendance-core` hoặc `vercel` CLI), chạy checklist §7, đạt rồi mới lên Production.
+
+## 6b. Dữ liệu đọc thẻ trong bản đóng gói
+
+`apps/web/card-assets/` (dữ liệu OCR tiếng Việt + wasm zxing) được tạo lúc build bởi `scripts/card-assets.mjs` (chép từ `node_modules`, kiểm sha256 đã ghim — đổi phiên bản gói thì build hỏng cho tới khi cập nhật hash). Code chạy chỉ đọc theo `<thư mục chạy>/card-assets`. `pnpm check:traces` (chạy trong `buildCommand`) hỏng nếu thiếu file trong trace của `/api/student/card` hoặc nếu đọc thử một thẻ giả trong thư mục mô phỏng output đã trace không được.
 
 ## 7. Checklist sau deploy
 

@@ -31,7 +31,12 @@ export const RULES = {
   studentLoginCode: { limit: 5, windowSec: 300 },
   staffLoginIp: { limit: 20, windowSec: 300 },
   scanNonce: { limit: 6, windowSec: 60 },
+  /** Đăng ký thẻ: 6 lượt/giờ/SV; lượt lỗi phía server đã phân loại được HOÀN (xem card/register.ts). */
   cardRegister: { limit: 6, windowSec: 3600 },
+  /** Trần tổng đăng ký thẻ/giờ/SV — đếm MỌI lượt đã qua nonce, kể cả lượt được hoàn (chặn lặp vô hạn khi server lỗi). */
+  cardRegisterTotal: { limit: 20, windowSec: 3600 },
+  /** Thử liveness (chỉ preview/dev, card/liveness-probe.ts): bộ đếm RIÊNG, không đụng lượt đăng ký thẻ. */
+  livenessProbe: { limit: 30, windowSec: 3600 },
   leaveExtract: { limit: 10, windowSec: 3600 },
   assistant: { limit: 20, windowSec: 3600 },
   export: { limit: 30, windowSec: 3600 },
@@ -86,6 +91,12 @@ export async function assertNotLimited(key: string, rule: RateLimitRule): Promis
     const started = new Date(rows[0].window_start).getTime();
     throw tooManyRequests(Math.max(1, Math.ceil((started + rule.windowSec * 1000 - Date.now()) / 1000)));
   }
+}
+
+/** Hoàn một lượt đã tính (lỗi phía server, không phải lỗi của người dùng). Không xuống dưới 0. */
+export async function refund(key: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(sql`update rate_limits set count = greatest(count - 1, 0) where key = ${key}`);
 }
 
 /** Xoá bộ đếm (ví dụ sau khi đăng nhập thành công). */

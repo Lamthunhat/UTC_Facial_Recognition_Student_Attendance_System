@@ -60,9 +60,14 @@ export default function ClassListPage() {
                   <li key={i}>{scheduleLabel(s, c.defaultRoom)}</li>
                 ))}
               </ul>
-              <Link href={`/gv/lop/${c.id}/danh-sach`} className="font-semibold text-primary hover:underline">
-                Nhập danh sách →
-              </Link>
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                <Link href={`/gv/lop/${c.id}/danh-sach`} className="font-semibold text-primary hover:underline">
+                  Nhập danh sách →
+                </Link>
+                <Link href={`/gv/lop/${c.id}/the`} className="font-semibold text-primary hover:underline">
+                  Thẻ SV →
+                </Link>
+              </div>
             </li>
           ))}
         </ul>
@@ -102,9 +107,14 @@ export default function ClassListPage() {
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">{c.activeStudents}</td>
                   <td className="px-3 py-2 text-right">
-                    <Link href={`/gv/lop/${c.id}/danh-sach`} className="whitespace-nowrap font-semibold text-primary hover:underline">
-                      Nhập danh sách
-                    </Link>
+                    <div className="flex flex-col items-end gap-1">
+                      <Link href={`/gv/lop/${c.id}/danh-sach`} className="whitespace-nowrap font-semibold text-primary hover:underline">
+                        Nhập danh sách
+                      </Link>
+                      <Link href={`/gv/lop/${c.id}/the`} className="whitespace-nowrap font-semibold text-primary hover:underline">
+                        Thẻ SV
+                      </Link>
+                    </div>
                   </td>
                 </tr>
               ))}

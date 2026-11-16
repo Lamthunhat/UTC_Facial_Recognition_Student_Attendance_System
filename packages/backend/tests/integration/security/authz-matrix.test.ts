@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { useTestAppDb } from "@utc/database/testing";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Role } from "../../../src/auth/jwt";
 import { createSession, SESSION_COOKIE } from "../../../src/auth/session";
 import type { RouteHandler } from "../../../src/http/handler";
@@ -32,6 +32,9 @@ const FAKE_ID = "00000000-0000-4000-8000-000000000000";
 
 beforeAll(async () => {
   process.env.JWT_SECRET = "integration-secret-integration-secret-xx";
+  // Bật công cụ chỉ-preview (liveness-probe…) để chúng cũng được kiểm phân quyền + đồng ý; production trả 404 (test riêng)
+  vi.stubEnv("VERCEL", "1");
+  vi.stubEnv("VERCEL_ENV", "preview");
   ctx = await useTestAppDb();
   const admin = (await ctx.pg.query<{ id: string }>(`insert into users (email,password_hash,full_name,role) values ('a@x','x','A','admin') returning id`)).rows[0].id;
   const gv = (await ctx.pg.query<{ id: string }>(`insert into users (email,password_hash,full_name,role) values ('g@x','x','G','instructor') returning id`)).rows[0].id;
@@ -40,7 +43,10 @@ beforeAll(async () => {
   cookies.instructor = `${SESSION_COOKIE}=${(await createSession(gv, "instructor")).token}`;
   cookies.student = `${SESSION_COOKIE}=${(await createSession(sv, "student")).token}`;
 }, 120_000);
-afterAll(() => ctx.close());
+afterAll(() => {
+  vi.unstubAllEnvs();
+  return ctx.close();
+});
 
 const files = walk(API_DIR);
 
