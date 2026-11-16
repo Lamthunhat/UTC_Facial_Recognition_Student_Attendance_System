@@ -31,7 +31,7 @@
 | 4 US6 thẻ SV | 12/12 | Backend trên `main` (PR #1); UI T062/T063 + các sửa sau thử thật trên PR #2 |
 | 5–11 (US2, US3, US5, US4, US9, US8, US7) | 0 | |
 | 12 Polish | 0/15 | T144 (Turnstile), T145 (tối ưu thời gian đăng ký thẻ) |
-- Test (lần chạy gần nhất, `aaedd7d`): backend **456**, database **51**, shared **32**, web **85** — tổng 624, đều pass; `typecheck`, `lint`, `build`, `check:traces` pass; CI (`check`, `codeql`) xanh.
+- Test (lần chạy gần nhất, `2dfde49`): backend **484**, database **51**, shared **32**, web **101** — tổng 668, đều pass; `typecheck`, `lint`, `build`, `check:traces` pass; CI (`check`, `codeql`) xanh.
 
 ### 4. Quyết định đã chốt
 - Body request ≤ **4 MB**: danh sách lớp 4 MB, ảnh thẻ 1 MB, mỗi khung mặt 1 MB (FR-090, FR-100, R14).
@@ -54,11 +54,11 @@
 - PR #1 **đã merge** vào `main` (2026-11-09). **PR #2** (`001-us6-ui` → `main`, UI US6 T062/T063 + sửa sau thử thật) **đang mở, CHƯA merge**.
 - **(người dùng báo) Thử iPhone thật** (iOS 18.4 Safari, 4G, thẻ UTC thật): đăng ký thẻ thành công; camera sau 1440×2560, `takePhoto` 2160×3840, vùng thẻ 1046×1658; Vercel 201 = 6,84 s, 422 = 4,97 s; MediaPipe tải 4,17 MB (gzip OK), khởi tạo ~4,5–6,7 s lần đầu; tự chụp hoạt động; header hamburger OK. Android chưa thử; bộ nhớ function chưa đo.
 - **Yaw mới CHƯA kiểm trên mặt thật**: lần thử iPhone gần nhất chạy trên bản deploy CŨ (ngưỡng client 0,08/0,28, công thức chia khoảng cách mắt) — client báo "Giữ yên" + tự chụp nhưng server trả `LIVENESS_FAILED` 2 lần. Cần thử lại trên deploy mới nhất (`/sv/the-sinh-vien/debug` → "Thử bộ hướng dẫn khuôn mặt").
-- **Việc tiếp theo trên PR #2**: công cụ so sánh yaw client ↔ server **chỉ ở preview/dev** — client gửi yaw metadata kèm khung, server trả yaw từng khung + lý do lỗi, UI preview hiện bảng so sánh; production không trả / không log.
+- **Công cụ so sánh yaw client ↔ server ĐÃ LÀM** (`2dfde49`, `packages/backend/src/face/yaw-debug.ts`, `apps/web/src/lib/student/yaw-debug.ts`): bật khi `VERCEL_ENV=preview`/`development` hoặc `pnpm dev` (fail closed). Nonce trả `yawDebug: true` → client gửi `clientYaw` → 201/lỗi liveness kèm `yawDebug` (yaw SCRFD từng khung, tư thế, lý do, `SAME_PERSON_FAILED`); bảng hiện ở màn làm lại khuôn mặt + màn kết quả. **Chưa thử trên Vercel Preview/điện thoại thật** (cần xác nhận `VERCEL_ENV` có ở runtime function).
 - Token `gh` thiếu quyền `workflow` → push sửa `.github/workflows/*` qua Git Credential Manager (`git -c credential.helper= -c credential.helper=manager push`). CI tự chạy trên `pull_request` (sự cố không chạy 2026-11-07 đã tự hết).
 
 ### 6. Việc tiếp theo (theo thứ tự)
-1. PR #2: công cụ so sánh yaw client↔server (preview/dev) → thử lại trên iPhone (+ Android) với yaw mới → hiệu chỉnh ngưỡng → (cân nhắc CSP toàn khu `/sv/*`) → người dùng merge.
+1. PR #2: thử lại trên iPhone (+ Android) với yaw mới + bảng so sánh yaw (deploy Preview mới nhất) → hiệu chỉnh ngưỡng → (cân nhắc CSP toàn khu `/sv/*`) → người dùng merge.
 2. Sau khi PR #2 merge: **Phase 5 US2 check-in** trên nhánh `001-us2-checkin`; route check-in dùng lại `@utc/shared/face-yaw` + `face/liveness.ts`, `use-camera`, `FaceChallenge`, `card-errors`, và **cần CSP wasm** (thêm vào `WASM_PATH_PREFIXES` hoặc CSP toàn khu `/sv/*`).
 3. T145 tối ưu thời gian đăng ký thẻ; T009 đo thêm mẫu + bộ nhớ.
 4. Polish: T144 Turnstile; nâng action Node 20; cron dọn ảnh hết hạn; cảnh báo `jose` (Edge) ở middleware.
