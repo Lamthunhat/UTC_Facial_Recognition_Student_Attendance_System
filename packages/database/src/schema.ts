@@ -55,6 +55,8 @@ export const eventReason = pgEnum("event_reason", [
   "no_checkin",
   "already_done",
   "attempts_exhausted",
+  // 0005 — toạ độ bất thường (độ chính xác phi thực tế, "dịch chuyển tức thời" giữa các lượt): nghi vấn, GV quyết
+  "gps_anomaly",
 ]);
 export const cellValue = pgEnum("cell_value", ["valid", "suspect", "rejected", "absent", "excused"]);
 export const noncePurpose = pgEnum("nonce_purpose", ["card", "checkin"]);

@@ -106,6 +106,17 @@ describe("ràng buộc dữ liệu", () => {
     await expect(ins("suspect", 4)).rejects.toThrow(/one_decision_per_window/);
   });
 
+  it("lý do gps_anomaly (0005): toạ độ bất thường → lượt nghi vấn để GV xem, không tự từ chối", async () => {
+    const w = (await db.query<{ id: string }>(`select id from attendance_windows where type='check_in'`)).rows[0].id;
+    await db.query(
+      `insert into attendance_events (window_id, student_id, attempt_no, result, reason, record, purge_after, record_purge_after)
+       values ($1,$2,1,'suspect','gps_anomaly','{}'::jsonb, now(), now())`,
+      [w, studentB],
+    );
+    const labels = (await db.query<{ v: string }>(`select unnest(enum_range(null::event_reason))::text as v`)).rows.map((r) => r.v);
+    expect(labels).toContain("gps_anomaly");
+  });
+
   it("đơn ảnh chat không thể tự duyệt (FR-106)", async () => {
     await expect(
       db.query(
