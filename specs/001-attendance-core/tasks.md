@@ -161,29 +161,29 @@ US1 (P1) → US6 (P1, thẻ SV — cần trước khi điểm danh) → US2 (P1)
 
 ### Tests
 
-- [ ] T065 [P] [US2] Unit test liveness: chuỗi yaw đúng/sai, 3 khung khác người, 0/2 mặt → retry trong `packages/backend/tests/unit/face/liveness.test.ts`
-- [ ] T066 [P] [US2] Unit test pipeline quyết định (bảng kịch bản: ngoài phạm vi, accuracy > 100 m → retry, thẻ < ngưỡng thấp → rejected, vùng biên → suspect, khung đóng, chưa ghi danh, đã điểm danh, hết lượt thử) trong `packages/backend/tests/unit/attendance/decide.test.ts`
-- [ ] T067 [P] [US2] Integration test `POST /api/windows/{id}/events`: thiếu nonce/ảnh 10 MB bị từ chối < 200 ms trước khi xử lý ảnh (FR-082) trong `packages/backend/tests/integration/checkin.test.ts`
-- [ ] T068 [P] [US2] E2E Playwright: GV mở check-in → SV đăng nhập, chọn lớp, quét (camera giả + geolocation giả) → thấy "Hợp lệ" trong `apps/web/tests/e2e/checkin.spec.ts`
-- [ ] T069 [P] [US2] Unit test dựng hồ sơ từ kết quả từng bước (dừng ở bước 2, 3, 5, 7; đủ trường; toạ độ làm tròn; không có embedding/ảnh) + validate Zod schema trong `packages/backend/tests/unit/records/build.test.ts`
-- [ ] T070 [P] [US2] Unit test diễn giải tiếng Việt theo mẫu cho mỗi `reason` trong `packages/backend/tests/unit/records/narrative.test.ts`
+- [x] T065 [P] [US2] Unit test liveness: chuỗi yaw đúng/sai, 3 khung khác người, 0/2 mặt → retry trong `packages/backend/tests/unit/face/liveness.test.ts` — đã có từ US6 (`face/liveness.test.ts`: 0/2 mặt); ánh xạ 0/2 mặt → `retry` kiểm ở `attendance/decide.test.ts`
+- [x] T066 [P] [US2] Unit test pipeline quyết định (bảng kịch bản: ngoài phạm vi, accuracy > 100 m → retry, thẻ < ngưỡng thấp → rejected, vùng biên → suspect, khung đóng, chưa ghi danh, đã điểm danh, hết lượt thử) trong `packages/backend/tests/unit/attendance/decide.test.ts`
+- [x] T067 [P] [US2] Integration test `POST /api/windows/{id}/events`: thiếu nonce/ảnh 10 MB bị từ chối < 200 ms trước khi xử lý ảnh (FR-082) trong `packages/backend/tests/integration/checkin.test.ts` — + luồng đầy đủ (29 ca, gồm 40 SV song song); 413 khi body chưa được đọc (`bodyUsed = false`), đo riêng 4 ms
+- [ ] T068 [P] [US2] E2E Playwright: GV mở check-in → SV đăng nhập, chọn lớp, quét (camera giả + geolocation giả) → thấy "Hợp lệ" trong `apps/web/tests/e2e/checkin.spec.ts` — chờ UI T078–T080
+- [x] T069 [P] [US2] Unit test dựng hồ sơ từ kết quả từng bước (dừng ở bước 2, 3, 5, 7; đủ trường; toạ độ làm tròn; không có embedding/ảnh) + validate Zod schema trong `packages/backend/tests/unit/records/build.test.ts`
+- [x] T070 [P] [US2] Unit test diễn giải tiếng Việt theo mẫu cho mỗi `reason` trong `packages/backend/tests/unit/records/narrative.test.ts`
 
 ### Implementation
 
-- [ ] T071 [P] [US2] Liveness server-side: yaw từ 5 điểm mốc, khớp chuỗi thử thách, cùng người qua 3 khung, chọn khung nhìn thẳng trong `packages/backend/src/face/liveness.ts`
-- [ ] T072 [P] [US2] Reverse geocode Goong + cache ô toạ độ 4 chữ số, fallback toạ độ trong `packages/backend/src/geo/reverse-geocode.ts` + API `GET /api/geo/reverse` (rate limit) cho lớp phủ camera trong `apps/web/src/app/api/geo/reverse/route.ts`
-- [ ] T073 [P] [US2] Đóng dấu ảnh (giờ server, địa chỉ, lớp, phòng) bằng `sharp` + SVG + font Be Vietnam Pro trong `packages/backend/src/evidence/stamp.ts`
-- [ ] T074 [US2] Service buổi/khung: `open-checkin` (buổi theo lịch hôm nay hoặc học bù, tâm GPS + sai số, tạo luôn khung check-out theo giờ kết thúc tiết cuối ± offset), `PATCH` đổi phòng/bỏ check-out, đóng sớm, tính "đang mở" theo `now()` trong `packages/backend/src/attendance/windows.ts`
-- [ ] T075 [US2] Pipeline quyết định bước 1–5 + 8 của plan.md (nonce, khung, ghi danh, GPS, liveness, so thẻ 2 ngưỡng, `late_minutes`, đóng dấu, lưu event, `purge_after`) trong `packages/backend/src/attendance/decide.ts`
-- [ ] T076 [US2] API GV `GET /api/classes/{id}/sessions/today`, `POST /api/classes/{id}/sessions/open-checkin`, `PATCH /api/sessions/{id}`, `POST /api/windows/{id}/close` trong `apps/web/src/app/api/classes/[id]/sessions/**/route.ts`, `apps/web/src/app/api/sessions/[id]/route.ts`, `apps/web/src/app/api/windows/[id]/close/route.ts`
-- [ ] T077 [US2] API SV `GET /api/student/classes`, `POST /api/windows/{id}/scan-nonce`, `POST /api/windows/{id}/events` (rate limit theo SV) trong `apps/web/src/app/api/student/classes/route.ts`, `apps/web/src/app/api/windows/[id]/{scan-nonce,events}/route.ts`
+- [x] T071 [P] [US2] Liveness server-side: yaw từ 5 điểm mốc, khớp chuỗi thử thách, cùng người qua 3 khung, chọn khung nhìn thẳng trong `packages/backend/src/face/liveness.ts` — dùng chung `card/live.ts` + `@utc/shared/face-yaw-thresholds` (đã có từ US6)
+- [x] T072 [P] [US2] Reverse geocode Goong + cache ô toạ độ 4 chữ số, fallback toạ độ trong `packages/backend/src/geo/reverse-geocode.ts` + API `GET /api/geo/reverse` (rate limit) cho lớp phủ camera trong `apps/web/src/app/api/geo/reverse/route.ts` — API ở `api/student/geo-reverse.ts` (đếm rate limit trước khi kiểm toạ độ)
+- [x] T073 [P] [US2] Đóng dấu ảnh (giờ server, địa chỉ, lớp, phòng) bằng `sharp` + SVG + font Be Vietnam Pro trong `packages/backend/src/evidence/stamp.ts` — font qua `fontfile` + `evidence/fontconfig.ts` (cấu hình không cache)
+- [x] T074 [US2] Service buổi/khung: `open-checkin` (buổi theo lịch hôm nay hoặc học bù, tâm GPS + sai số, tạo luôn khung check-out theo giờ kết thúc tiết cuối ± offset), `PATCH` đổi phòng/bỏ check-out, đóng sớm, tính "đang mở" theo `now()` trong `packages/backend/src/attendance/windows.ts`
+- [x] T075 [US2] Pipeline quyết định bước 1–5 + 8 của plan.md (nonce, khung, ghi danh, GPS, liveness, so thẻ 2 ngưỡng, `late_minutes`, đóng dấu, lưu event, `purge_after`) trong `packages/backend/src/attendance/decide.ts` — phần thuần `attendance/decide.ts`, phần DB/ảnh `attendance/checkin.ts`
+- [x] T076 [US2] API GV `GET /api/classes/{id}/sessions/today`, `POST /api/classes/{id}/sessions/open-checkin`, `PATCH /api/sessions/{id}`, `POST /api/windows/{id}/close` trong `apps/web/src/app/api/classes/[id]/sessions/**/route.ts`, `apps/web/src/app/api/sessions/[id]/route.ts`, `apps/web/src/app/api/windows/[id]/close/route.ts`
+- [x] T077 [US2] API SV `GET /api/student/classes`, `POST /api/windows/{id}/scan-nonce`, `POST /api/windows/{id}/events` (rate limit theo SV) trong `apps/web/src/app/api/student/classes/route.ts`, `apps/web/src/app/api/windows/[id]/{scan-nonce,events}/route.ts` — backend ở `api/student/{scan-nonce,checkin-event}.ts`; `openWindow` của `GET /api/student/classes`
 - [ ] T078 [P] [US2] UI GV "Mở điểm danh": hiện buổi hôm nay (tiết, giờ, phòng), lấy GPS, cảnh báo sai số > 50 m, chỉnh thời lượng/phòng trong `apps/web/src/app/gv/lop/[classId]/mo-diem-danh/page.tsx`
 - [ ] T079 [P] [US2] UI SV danh sách lớp (đánh dấu lớp đang mở) trong `apps/web/src/app/sv/lop/page.tsx`
 - [ ] T080 [US2] UI SV điểm danh: camera trước, lớp phủ giờ/địa chỉ/lớp/phòng, MediaPipe hướng dẫn quay đầu, chụp 3 khung nén 720p, gửi + hiển thị kết quả/lý do/lượt còn lại trong `apps/web/src/app/sv/diem-danh/[windowId]/page.tsx`, `apps/web/src/components/camera/FaceChallenge.tsx`
-- [ ] T081 [US2] Zod schema `attendance-record.v1` + builder gom kết quả từng bước trong `packages/backend/src/records/schema.ts`, `packages/backend/src/records/build.ts`
-- [ ] T082 [US2] Gắn builder vào pipeline ngay từ đầu (Constitution III): ghi `record` cho mọi kết quả (kể cả trả về sớm), lưu `retry`, `image_sha256`, `record_purge_after` trong `packages/backend/src/attendance/decide.ts`
-- [ ] T083 [US2] `scan_sessions` khi cấp nonce + API `POST /api/scan-sessions/{id}/client-error`; client báo lỗi camera/GPS/mạng trong `apps/web/src/app/api/scan-sessions/[id]/client-error/route.ts`, `apps/web/src/components/camera/FaceChallenge.tsx`
-- [ ] T084 [P] [US2] Diễn giải tiếng Việt theo mẫu trong `packages/backend/src/records/narrative.ts`
+- [x] T081 [US2] Zod schema `attendance-record.v1` + builder gom kết quả từng bước trong `packages/backend/src/records/schema.ts`, `packages/backend/src/records/build.ts`
+- [x] T082 [US2] Gắn builder vào pipeline ngay từ đầu (Constitution III): ghi `record` cho mọi kết quả (kể cả trả về sớm), lưu `retry`, `image_sha256`, `record_purge_after` trong `packages/backend/src/attendance/decide.ts`
+- [ ] T083 [US2] `scan_sessions` khi cấp nonce + API `POST /api/scan-sessions/{id}/client-error`; client báo lỗi camera/GPS/mạng trong `apps/web/src/app/api/scan-sessions/[id]/client-error/route.ts`, `apps/web/src/components/camera/FaceChallenge.tsx` — **backend xong** (`scan_sessions` khi cấp nonce + API); phần client (FaceChallenge báo lỗi) làm cùng UI T080
+- [x] T084 [P] [US2] Diễn giải tiếng Việt theo mẫu trong `packages/backend/src/records/narrative.ts`
 
 **Checkpoint**: Check-in đầu-cuối chạy; Q6–Q9, Q12 đạt
 
@@ -197,11 +197,11 @@ US1 (P1) → US6 (P1, thẻ SV — cần trước khi điểm danh) → US2 (P1)
 
 ### Tests
 
-- [ ] T085 [P] [US3] Integration test: A rồi C cùng mặt cùng khung → cả hai `suspect`; cùng người ở 2 lớp khác → cả hai `valid`; hai request trùng gửi đồng thời vẫn bị bắt (khoá theo window) trong `packages/backend/tests/integration/duplicate.test.ts`
+- [x] T085 [P] [US3] Integration test: A rồi C cùng mặt cùng khung → cả hai `suspect`; cùng người ở 2 lớp khác → cả hai `valid`; hai request trùng gửi đồng thời vẫn bị bắt (khoá theo window) trong `packages/backend/tests/integration/duplicate.test.ts` — trong `packages/backend/tests/integration/checkin.test.ts` (describe "một khuôn mặt cho nhiều mã…")
 
 ### Implementation
 
-- [ ] T086 [US3] Bước 7 pipeline: truy vấn pgvector trong khung, `SELECT … FOR UPDATE` theo `window_id`, cập nhật các lượt kia thành `suspect` + `duplicate_of` trong cùng transaction trong `packages/backend/src/attendance/duplicate.ts`
+- [x] T086 [US3] Bước 7 pipeline: truy vấn pgvector trong khung, `SELECT … FOR UPDATE` theo `window_id`, cập nhật các lượt kia thành `suspect` + `duplicate_of` trong cùng transaction trong `packages/backend/src/attendance/duplicate.ts` — trong `attendance/checkin.ts` (`finish`: khoá `attendance_windows … for update`, followUps + audit `attendance.flag_duplicate`)
 - [ ] T087 [US3] Cảnh báo GV khi có lượt nghi vấn mới (cờ trên bảng + danh sách cần duyệt) trong `packages/backend/src/attendance/alerts.ts`
 - [ ] T088 [US3] UI duyệt nghi vấn: ảnh các lượt trùng đặt cạnh nhau + ảnh thẻ + độ tương đồng, duyệt từng lượt trong `apps/web/src/app/gv/lop/[classId]/nghi-van/page.tsx`
 
@@ -241,13 +241,13 @@ US1 (P1) → US6 (P1, thẻ SV — cần trước khi điểm danh) → US2 (P1)
 
 ### Tests
 
-- [ ] T097 [P] [US4] Unit test: buổi T1–3 → check-out 9:15–9:35; chưa check-in → `NO_CHECKIN`; mặt Out khác mặt In → cả hai `suspect/checkin_mismatch` trong `packages/backend/tests/unit/attendance/checkout.test.ts`
+- [x] T097 [P] [US4] Unit test: buổi T1–3 → check-out 9:15–9:35; chưa check-in → `NO_CHECKIN`; mặt Out khác mặt In → cả hai `suspect/checkin_mismatch` trong `packages/backend/tests/unit/attendance/checkout.test.ts` — `attendance/window-times.test.ts` (9:15–9:35) + `decide.test.ts` (no_checkin, checkin_mismatch) + integration `checkin.test.ts` (cả hai lượt nghi vấn)
 - [ ] T098 [P] [US4] Integration test luồng check-in → rời phòng → check-out ngoài phạm vi → trạng thái "Về sớm" trong `packages/backend/tests/integration/checkout.test.ts`
 
 ### Implementation
 
-- [ ] T099 [US4] Bước 6 pipeline: so embedding Out/spot-check với lượt In hợp lệ của chính mã, đánh dấu cả hai lượt trong `packages/backend/src/attendance/checkin-match.ts`
-- [ ] T100 [US4] API `POST /api/sessions/{id}/spot-check` + bỏ check-out (`checkoutSkipped`) trong `apps/web/src/app/api/sessions/[id]/spot-check/route.ts`
+- [x] T099 [US4] Bước 6 pipeline: so embedding Out/spot-check với lượt In hợp lệ của chính mã, đánh dấu cả hai lượt trong `packages/backend/src/attendance/checkin-match.ts` — trong `attendance/checkin.ts` + `Decision.checkin` (`decide.ts`)
+- [x] T100 [US4] API `POST /api/sessions/{id}/spot-check` + bỏ check-out (`checkoutSkipped`) trong `apps/web/src/app/api/sessions/[id]/spot-check/route.ts` — `api/sessions/spot-check.ts` + `PATCH /api/sessions/{id}` (`checkoutSkipped`)
 - [ ] T101 [US4] UI SV: polling 10 s, thông báo trong trình duyệt khi khung check-out/đột xuất mở, nút check-out trong `apps/web/src/app/sv/lop/page.tsx`, `apps/web/src/components/notify/WindowWatcher.tsx`
 - [ ] T102 [P] [US4] UI GV: nút "Kiểm tra đột xuất", "Cho lớp nghỉ sớm (bỏ check-out)", hiển thị giờ check-out tự mở trong `apps/web/src/app/gv/lop/[classId]/page.tsx`
 

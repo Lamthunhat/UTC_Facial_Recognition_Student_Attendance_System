@@ -55,3 +55,6 @@ playwright-report/
 card-assets/
 # MediaPipe tự host (tải/chép lúc build: models:download, scripts/card-assets.mjs)
 apps/web/public/mediapipe/
+
+# fontconfig (sharp/Pango) trên Windows khi không có FONTCONFIG_FILE: cache mặc định tạo trong thư mục chạy
+LOCAL_APPDATA_FONTCONFIG_CACHE/

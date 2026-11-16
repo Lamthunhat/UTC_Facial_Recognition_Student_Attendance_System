@@ -1,0 +1,1 @@
+ALTER TYPE "public"."event_reason" ADD VALUE 'gps_anomaly';

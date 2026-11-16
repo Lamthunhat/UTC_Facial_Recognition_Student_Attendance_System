@@ -36,6 +36,13 @@
       "when": 1794247077660,
       "tag": "0004_card_ocr_name",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794854945761,
+      "tag": "0005_checkin_gps_anomaly",
+      "breakpoints": true
     }
   ]
 }

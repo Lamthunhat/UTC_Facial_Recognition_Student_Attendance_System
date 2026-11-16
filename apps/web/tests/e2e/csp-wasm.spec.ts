@@ -1,7 +1,5 @@
-import { createHmac, randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { studentToken } from "./support";
 
 /**
  * CSP theo khu (headers.ts needsWasm): 'wasm-unsafe-eval' cho TOÀN KHU SV /sv/*. CSP gắn với DOCUMENT → điều hướng phía
@@ -13,26 +11,6 @@ import { expect, test, type Page } from "@playwright/test";
  * JWT_SECRET đọc từ biến môi trường hoặc apps/web/.env.local (không in ra). API SV được giả lập bằng page.route — middleware
  * chỉ kiểm chữ ký JWT, không cần DB.
  */
-function jwtSecret(): string {
-  if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
-  const line = readFileSync(join(__dirname, "../../.env.local"), "utf8")
-    .split(/\r?\n/)
-    .find((l) => l.startsWith("JWT_SECRET="));
-  const v = line?.slice("JWT_SECRET=".length).trim().replace(/^["']|["']$/g, "");
-  if (!v) throw new Error("Thiếu JWT_SECRET (biến môi trường hoặc apps/web/.env.local)");
-  return v;
-}
-
-/** JWT phiên SV HS256 — cùng định dạng packages/backend/src/auth/jwt.ts. */
-function studentToken(): string {
-  const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
-  const now = Math.floor(Date.now() / 1000);
-  const head = b64({ alg: "HS256", typ: "JWT" });
-  const body = b64({ role: "student", sid: "e2e-csp", sub: randomUUID(), iss: "utc-face-attendance", iat: now, exp: now + 600 });
-  const sig = createHmac("sha256", jwtSecret()).update(`${head}.${body}`).digest("base64url");
-  return `${head}.${body}.${sig}`;
-}
-
 const WASM_URL = "/mediapipe/tasks-vision-1.2.0/vision_wasm_internal.wasm";
 
 /** Biên dịch wasm MediaPipe tự host trong document hiện tại → "ok" hoặc tên lỗi (CSP chặn → CompileError/EvalError). */

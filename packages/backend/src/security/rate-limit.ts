@@ -37,6 +37,10 @@ export const RULES = {
   cardRegisterTotal: { limit: 20, windowSec: 3600 },
   /** Thử liveness (chỉ preview/dev, card/liveness-probe.ts): bộ đếm RIÊNG, không đụng lượt đăng ký thẻ. */
   livenessProbe: { limit: 30, windowSec: 3600 },
+  /** Gửi lượt điểm danh (check-in/out/đột xuất), theo SV — mỗi lượt tốn CPU nhận diện; 3 lượt bị từ chối/khung + thử lại. */
+  checkinSubmit: { limit: 12, windowSec: 600 },
+  /** Lỗi thiết bị client báo về phiên quét (T083). */
+  clientError: { limit: 20, windowSec: 600 },
   leaveExtract: { limit: 10, windowSec: 3600 },
   assistant: { limit: 20, windowSec: 3600 },
   export: { limit: 30, windowSec: 3600 },
