@@ -61,7 +61,7 @@
 - **Trang `/sv/the-sinh-vien/debug`** chỉ preview/dev: `page.tsx` server component gọi `notFound()` khi `yawDebugEnabled()` = false (`359bcf7`).
 
 ### 5. Đang dở
-- PR #1, PR #2 **đã merge** vào `main` (PR #2: 2026-11-16). **Phase 5 US2 lượt 1** (test + backend, chưa UI) trên nhánh `001-us2-checkin`, PR vào `main` **đang mở, CHƯA merge**.
+- PR #1, PR #2 **đã merge** vào `main` (PR #2: 2026-11-16). **Phase 5 US2 lượt 1** (test + backend, chưa UI) trên nhánh `001-us2-checkin`, **PR #3** vào `main` **đang mở, CHƯA merge**.
 - **(người dùng báo) Thử iPhone thật** (iOS 18.4 Safari, 4G, thẻ UTC thật): đăng ký thẻ thành công; camera sau 1440×2560, `takePhoto` 2160×3840, vùng thẻ 1046×1658; Vercel 201 = 6,84 s, 422 = 4,97 s; MediaPipe tải 4,17 MB (gzip OK), khởi tạo ~4,5–6,7 s lần đầu; tự chụp hoạt động; header hamburger OK. Android chưa thử; bộ nhớ function chưa đo.
 - **Ngưỡng yaw 0,22 ĐÃ kiểm trên iPhone** (người dùng báo, 2026-11-17, iOS 18.4, Preview `ffeceb2`): 4 lượt "Thử liveness" đều QUA; khung quay |S − C| ≤ 0,089, |S| nhỏ nhất 0,321 → biên 0,18 đủ cho iPhone (bảng ở research R2). **T011 vẫn mở**: Android chưa đo; chưa thử lại đăng ký thẻ thật với ngưỡng mới.
 - **Thử liveness không tốn lượt ĐÃ LÀM** (`1e0fc56` tách `card/live.ts`, `85321c1`): `POST /api/student/liveness-probe/nonce` + `POST /api/student/liveness-probe` (`card/liveness-probe.ts`) — chỉ khi `yawDebugEnabled()`, production 404; cần đồng ý; đúng pipeline liveness của đăng ký thẻ, không ảnh thẻ, không lưu gì; bộ đếm riêng `RULES.livenessProbe` 30/giờ/SV. Nonce purpose `card` + challenge bọc `{kind:'liveness_probe'}` (tránh migration enum) → không dùng chéo được. Trang `/sv/the-sinh-vien/debug` → "Thử liveness (không tốn lượt)". Đã chạy trên Preview + iPhone (người dùng báo).
@@ -69,7 +69,7 @@
 - Token `gh` thiếu quyền `workflow` → push sửa `.github/workflows/*` qua Git Credential Manager (`git -c credential.helper= -c credential.helper=manager push`). CI tự chạy trên `pull_request` (sự cố không chạy 2026-11-07 đã tự hết).
 
 ### 6. Việc tiếp theo (theo thứ tự)
-1. Review + merge PR US2 lượt 1. Áp migration **0005** lên Supabase PREVIEW rồi PROD (`db:migrate`, `CONFIRM_REMOTE_DB=true`) TRƯỚC khi deploy code dùng `gps_anomaly`.
+1. Review + merge PR #3 (US2 lượt 1). Áp migration **0005** lên Supabase PREVIEW rồi PROD (`db:migrate`, `CONFIRM_REMOTE_DB=true`) TRƯỚC khi deploy code dùng `gps_anomaly`.
 2. **US2 lượt 2 — UI**: T078 GV "Mở điểm danh" (lấy GPS, cảnh báo > 50 m), T079 đánh dấu lớp đang mở (`openWindow`), T080 màn điểm danh (`FaceChallenge`, lớp phủ giờ/địa chỉ qua `/api/geo/reverse`, gửi 3 khung + vị trí, kết quả), T083 client báo lỗi, T068 e2e. Dùng lại `use-camera`, `FaceChallenge`, `card-errors`, `yaw-debug` (nonce trả `yawDebug`).
 3. Trên Preview: đo `checkin_timing` (p95 ≤ 5 s?) + kiểm đóng dấu ảnh (fontconfig/font trên Vercel) + Goong (cần `GOONG_API_KEY` ở Preview/Production).
 4. Còn từ PR #2: "Thử liveness" + đăng ký thẻ trên **Android** (chưa đo lần nào).
