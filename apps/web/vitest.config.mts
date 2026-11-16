@@ -3,6 +3,8 @@ import { defineConfig } from "vitest/config";
 
 /** Test logic phía client (thuần, không DOM): src/lib/**; middleware + next.config (node). */
 export default defineConfig({
+  // tsconfig của Next dùng jsx "preserve"; test server component (.tsx) cần biến đổi JSX
+  oxc: { jsx: { runtime: "automatic" } },
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
