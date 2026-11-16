@@ -1,10 +1,9 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Alert, Field, Input } from "@/components/ui/input";
-import { useAppNavigate } from "@/components/app-link";
 import { api, ApiError } from "@/lib/api";
 
 type LoginResult = { student: { consentValid: boolean; hasActiveCard: boolean } };
@@ -19,8 +18,6 @@ function safeNext(next: string | null) {
  * Chưa đồng ý điều khoản (đúng phiên bản hiện hành) → màn đồng ý trước.
  */
 export function StudentLoginForm() {
-  const router = useRouter();
-  const navigate = useAppNavigate();
   const params = useSearchParams();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -33,8 +30,8 @@ export function StudentLoginForm() {
     try {
       const res = await api<LoginResult>("/api/auth/student/login", { method: "POST", json: { studentCode: code } });
       const next = safeNext(params.get("next"));
-      navigate(res.student.consentValid ? next : `/sv/dong-y?next=${encodeURIComponent(next)}`, { replace: true });
-      router.refresh();
+      // Tải DOCUMENT mới: /sv (CSP chặt) → khu /sv/* (CSP có 'wasm-unsafe-eval') — CSP gắn với document (headers.ts needsWasm)
+      window.location.replace(res.student.consentValid ? next : `/sv/dong-y?next=${encodeURIComponent(next)}`);
     } catch (err) {
       if (err instanceof ApiError && err.status === 429) {
         const min = err.retryAfterSec ? Math.max(1, Math.ceil(err.retryAfterSec / 60)) : null;

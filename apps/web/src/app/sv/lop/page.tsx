@@ -1,6 +1,6 @@
 "use client";
 
-import { AppLink } from "@/components/app-link";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { CardStatusBanner } from "@/components/student/card-status-banner";
@@ -45,12 +45,12 @@ export default function StudentClassesPage() {
       {card !== undefined && (
         <CardStatusBanner card={card}>
           {studentCardView(card).canRegister && (
-            <AppLink
+            <Link
               href="/sv/the-sinh-vien"
               className="inline-flex justify-center rounded-lg bg-primary px-4 py-2.5 font-semibold text-primary-foreground hover:opacity-90"
             >
               Đăng ký thẻ sinh viên
-            </AppLink>
+            </Link>
           )}
         </CardStatusBanner>
       )}

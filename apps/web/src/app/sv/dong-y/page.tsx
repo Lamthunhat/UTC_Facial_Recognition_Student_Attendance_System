@@ -5,13 +5,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/input";
-import { useAppNavigate } from "@/components/app-link";
 import { api, ApiError } from "@/lib/api";
 
 /** T063 / FR-050 — Đồng ý thu thập & xử lý dữ liệu sinh trắc trước khi chụp thẻ. Văn bản + phiên bản từ @utc/shared/consent. */
 function ConsentForm() {
   const router = useRouter();
-  const navigate = useAppNavigate();
   const params = useSearchParams();
   const [agreed, setAgreed] = useState(false);
   const [pending, setPending] = useState(false);
@@ -27,7 +25,7 @@ function ConsentForm() {
     try {
       await api("/api/student/consent", { method: "POST", json: { version: CONSENT_VERSION } });
       const next = params.get("next");
-      navigate(next && next.startsWith("/sv/") && !next.startsWith("//") ? next : "/sv/lop", { replace: true });
+      router.replace(next && next.startsWith("/sv/") && !next.startsWith("//") ? next : "/sv/lop");
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) router.replace("/sv?next=/sv/dong-y");
       setError(e instanceof ApiError && e.status !== 0 ? e.message : "Không kết nối được máy chủ. Vui lòng thử lại.");

@@ -68,13 +68,14 @@ describe("chống CSRF (FR-087)", () => {
     ).toBe(false));
 });
 
-describe("needsWasm — route nào được biên dịch WebAssembly (nhận diện mặt ở trình duyệt)", () => {
-  it("trang thẻ SV và trang chẩn đoán", () => {
-    expect(needsWasm("/sv/the-sinh-vien")).toBe(true);
-    expect(needsWasm("/sv/the-sinh-vien/debug")).toBe(true);
+describe("needsWasm — 'wasm-unsafe-eval' cho TOÀN KHU SV /sv/* (nhận diện mặt ở trình duyệt)", () => {
+  it("mọi trang trong khu SV đã đăng nhập", () => {
+    for (const p of ["/sv/lop", "/sv/dong-y", "/sv/the-sinh-vien", "/sv/the-sinh-vien/debug", "/sv/lop/abc/diem-danh"]) {
+      expect(needsWasm(p), p).toBe(true);
+    }
   });
-  it("route khác giữ CSP cũ (kể cả tên gần giống)", () => {
-    for (const p of ["/", "/sv", "/sv/lop", "/sv/dong-y", "/gv/lop", "/login", "/api/student/card", "/sv/the-sinh-vien-khac"]) {
+  it("trang đăng nhập SV /sv, khu GV/Admin, /login, API và tên gần giống → CSP chặt", () => {
+    for (const p of ["/", "/sv", "/svx", "/sv-abc", "/gv/lop", "/admin", "/admin/users", "/login", "/api/student/card", "/api/sv/x"]) {
       expect(needsWasm(p), p).toBe(false);
     }
   });
