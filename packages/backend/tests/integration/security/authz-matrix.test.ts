@@ -77,7 +77,7 @@ describe("ma trận phân quyền API backend (T039)", () => {
           expect((await call(cookies[role])).status, `${rel} ${m} với vai trò ${role}`).toBe(403);
         }
       }
-    });
+    }, 120_000); // lần import đầu của API nặng (exceljs, onnx…) có thể chậm khi các worker khác đang chạy tải
   }
 });
 

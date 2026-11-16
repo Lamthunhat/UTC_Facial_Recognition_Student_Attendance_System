@@ -10,6 +10,9 @@
     },
     "src/app/api/student/liveness-probe/route.ts": {
       "maxDuration": 60
+    },
+    "src/app/api/windows/[id]/events/route.ts": {
+      "maxDuration": 30
     }
   }
 }

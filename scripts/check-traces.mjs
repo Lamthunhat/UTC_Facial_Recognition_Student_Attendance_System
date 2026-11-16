@@ -64,6 +64,29 @@ for (const bad of FORBIDDEN_IN_CODE) {
   else console.log(`  OK    mã server không nhắc tới "${bad}"`);
 }
 
+// 2b. Route lượt điểm danh (US2): model ONNX + font đóng dấu ảnh bằng chứng (sharp/Pango nạp font theo đường dẫn)
+{
+  const ROUTE_EVENTS = "api/windows/[id]/events";
+  const dir = path.join(APP, ".next/server/app", ROUTE_EVENTS);
+  const files = JSON.parse(readFileSync(path.join(dir, "route.js.nft.json"), "utf8")).files.map((f) => posix(path.relative(REPO, path.resolve(dir, f))));
+  console.log(`/${ROUTE_EVENTS} (${files.length} file trong trace)`);
+  const NEED = [
+    ["model det_500m.onnx", /models\/det_500m\.onnx$/],
+    ["model w600k_mbf.onnx", /models\/w600k_mbf\.onnx$/],
+    ["font BeVietnamPro-SemiBold.ttf (đóng dấu ảnh)", /apps\/web\/public\/fonts\/BeVietnamPro-SemiBold\.ttf$/],
+    ...(process.platform === "linux"
+      ? [
+          ["onnxruntime linux-x64", /onnxruntime-node\/bin\/napi-v\d+\/linux\/x64\/onnxruntime_binding\.node$/],
+          ["sharp linux-x64", /@img\/sharp-linux-x64\//],
+        ]
+      : []),
+  ];
+  for (const [label, re] of NEED) {
+    if (files.some((f) => re.test(f))) console.log(`  CÓ    ${label}`);
+    else fail(`thiếu ${label}`);
+  }
+}
+
 // 3. Chạy thử trong thư mục mô phỏng output đã trace
 const SKIP = /\.(onnx|node|dll|so(\.\d+)*|dylib)$|pglite\.(wasm|data)$/; // lớn và không cần cho bước đọc thẻ thử
 const sim = mkdtempSync(path.join(tmpdir(), "trace-sim-"));
