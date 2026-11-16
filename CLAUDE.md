@@ -2,7 +2,7 @@
 
 ## Trạng thái & quy ước
 
-*Cập nhật 2026-11-17. Đọc file này trước khi làm tiếp; kiểm lại repo/PR nếu nghi ngờ thông tin đã cũ. "(người dùng báo)" = sự thật do người dùng kiểm, không kiểm được từ repo.*
+*Cập nhật 2026-11-17 (US2 lượt 1). Đọc file này trước khi làm tiếp; kiểm lại repo/PR nếu nghi ngờ thông tin đã cũ. "(người dùng báo)" = sự thật do người dùng kiểm, không kiểm được từ repo.*
 
 ### 1. Dự án
 - Hệ thống điểm danh sinh viên Trường ĐH Giao thông Vận tải (UTC) bằng khuôn mặt + GPS; giao diện tiếng Việt.
@@ -28,10 +28,13 @@
 | 1b Spike | 0/4 | T009: Vercel 1 mẫu (đăng ký thẻ 201 = 6,84 s, 422 = 4,97 s), còn nhiều mẫu + bộ nhớ. T010: 2 lượt thẻ thật OK (còn ≥ 4 thẻ khác). T011 hiệu chỉnh ngưỡng. T012 Go/No-Go (ngưỡng tách: đăng ký thẻ ≤ 10 s, điểm danh ≤ 5 s) |
 | 2 Foundational | 27/27 | |
 | 3 US1 lớp + danh sách | 13/13 | Trên `main` |
-| 4 US6 thẻ SV | 12/12 | Backend trên `main` (PR #1); UI T062/T063 + các sửa sau thử thật trên PR #2 |
-| 5–11 (US2, US3, US5, US4, US9, US8, US7) | 0 | |
+| 4 US6 thẻ SV | 12/12 | Trên `main` (PR #1, PR #2) |
+| 5 US2 check-in | 15/20 | **Lượt 1 (test + backend) trên nhánh `001-us2-checkin`**; còn T068 e2e, T078–T080 UI, T083 phần client |
+| 6 US3 trùng mặt | 2/4 | T085 (test trong `checkin.test.ts`), T086 xong; còn T087 cảnh báo GV, T088 UI duyệt |
+| 8 US4 check-out/đột xuất | 3/6 | T097, T099, T100 (backend) xong; còn T098 (cần trạng thái buổi US5), T101–T102 UI |
+| 7, 9–11 (US5, US9, US8, US7) | 0 | |
 | 12 Polish | 0/15 | T144 (Turnstile), T145 (tối ưu thời gian đăng ký thẻ) |
-- Test (lần chạy gần nhất, ngưỡng liveness 0,22): backend **505**, database **51**, shared **48**, web **106** — tổng 710 (+ e2e `csp-wasm` 2/2), đều pass; `typecheck`, `lint`, `build`, `check:traces` pass; CI (`check`, `codeql`) xanh.
+- Test (lần chạy gần nhất, `001-us2-checkin` lượt 1): backend **692**, database **52**, shared **48**, web **111** — tổng 903 (+ e2e `csp-wasm` 2 + `debug-page` 2, chạy với bản build production), đều pass; `typecheck`, `lint`, `build`, `check:traces` pass. Bộ test backend đã chạy lặp 6+ lần liên tiếp không chập chờn (sau khi sửa fontconfig).
 
 ### 4. Quyết định đã chốt
 - Body request ≤ **4 MB**: danh sách lớp 4 MB, ảnh thẻ 1 MB, mỗi khung mặt 1 MB (FR-090, FR-100, R14).
@@ -49,9 +52,16 @@
 - Đóng gói Vercel: không `require.resolve` gói lúc chạy; include mọi `tesseract-core*.wasm` (tesseract.js 7 Node luôn nạp core không-lstm); `pnpm check:traces` (CI + `buildCommand`) kiểm file + chạy thử đọc thẻ giả trong thư mục mô phỏng output đã trace.
 - Migration runner chung (`packages/database/src/migrator.ts`, tự baseline). Script ghi DB: `db:seed:demo` chỉ cục bộ; `db:migrate`/`admin:create` lên remote cần `CONFIRM_REMOTE_DB=true`. Kho ảnh dev: pglite + không Supabase → `.local-storage/`.
 - CodeQL: repo private → `upload: never` + `.github/scripts/codeql-gate.mjs`.
+- **Check-in (US2, research R17)** — `attendance/decide.ts` (thuần) + `attendance/checkin.ts` (DB/ảnh) + `attendance/windows.ts` (GV):
+  - Thứ tự: nonce (đúng SV + khung) → rate limit **theo SV** (`checkinSubmit` 12/10 phút; nonce 6/phút) → toạ độ (422) → khung/ghi danh/đã check-in/lượt → GPS (`retry` sai số > 100 m, `rejected` ngoài bán kính — **không xử lý ảnh**) → liveness 3 khung (`card/live.ts`, `SERVER_YAW`) → thẻ 2 ngưỡng (`CARD_REJECT_BELOW` 0,35 từ chối / `CARD_ACCEPT_ABOVE` 0,5) → check-out/đột xuất so lượt check-in (`CHECKIN_MATCH_ABOVE` 0,55) → đóng dấu + upload → transaction **khoá `attendance_windows … for update`**: trùng mặt mã khác (`DUPLICATE_ABOVE`) → cả hai `suspect`.
+  - Nghi vấn KHÔNG tự từ chối; SV nhận `reason: null`. GPS bất thường (accuracy < 1 m, tốc độ > 50 m/s giữa 2 lượt) → `suspect/gps_anomaly` (migration 0005). Thẻ `pending_review` → 412 `CARD_PENDING_REVIEW`.
+  - Mọi lượt có kết luận ghi `attendance_events` + `attendance-record.v1` (`records/`); 409 `ALREADY_DONE` không tạo lượt. Ảnh + vector chỉ lưu với valid/suspect; ảnh `evidence/{session}/{window}/{event}.jpg` xoá sau 7 ngày; hồ sơ tới hết lớp + 30 ngày. Tối đa 3 lượt bị từ chối/khung.
+  - Đồng hồ: nghiệp vụ buổi/khung dùng `clock.ts` `now()` (test: `setNowForTest`). Check-out tạo sẵn khi mở check-in, "đang mở" tính theo giờ — không cron.
+- **Đóng dấu ảnh**: sharp `text` + `fontfile` Be Vietnam Pro; `evidence/fontconfig.ts` tự ghi `fonts.conf` **không cachedir** + đặt `FONTCONFIG_FILE` (đa tiến trình dựng cache fontconfig → crash 0xC0000374, đã tái hiện trên Windows). Vitest backend đặt biến trước khi tạo worker.
+- **Trang `/sv/the-sinh-vien/debug`** chỉ preview/dev: `page.tsx` server component gọi `notFound()` khi `yawDebugEnabled()` = false (`359bcf7`).
 
 ### 5. Đang dở
-- PR #1 **đã merge** vào `main` (2026-11-09). **PR #2** (`001-us6-ui` → `main`, UI US6 T062/T063 + sửa sau thử thật) **đang mở, CHƯA merge**.
+- PR #1, PR #2 **đã merge** vào `main` (PR #2: 2026-11-16). **Phase 5 US2 lượt 1** (test + backend, chưa UI) trên nhánh `001-us2-checkin`, PR vào `main` **đang mở, CHƯA merge**.
 - **(người dùng báo) Thử iPhone thật** (iOS 18.4 Safari, 4G, thẻ UTC thật): đăng ký thẻ thành công; camera sau 1440×2560, `takePhoto` 2160×3840, vùng thẻ 1046×1658; Vercel 201 = 6,84 s, 422 = 4,97 s; MediaPipe tải 4,17 MB (gzip OK), khởi tạo ~4,5–6,7 s lần đầu; tự chụp hoạt động; header hamburger OK. Android chưa thử; bộ nhớ function chưa đo.
 - **Ngưỡng yaw 0,22 ĐÃ kiểm trên iPhone** (người dùng báo, 2026-11-17, iOS 18.4, Preview `ffeceb2`): 4 lượt "Thử liveness" đều QUA; khung quay |S − C| ≤ 0,089, |S| nhỏ nhất 0,321 → biên 0,18 đủ cho iPhone (bảng ở research R2). **T011 vẫn mở**: Android chưa đo; chưa thử lại đăng ký thẻ thật với ngưỡng mới.
 - **Thử liveness không tốn lượt ĐÃ LÀM** (`1e0fc56` tách `card/live.ts`, `85321c1`): `POST /api/student/liveness-probe/nonce` + `POST /api/student/liveness-probe` (`card/liveness-probe.ts`) — chỉ khi `yawDebugEnabled()`, production 404; cần đồng ý; đúng pipeline liveness của đăng ký thẻ, không ảnh thẻ, không lưu gì; bộ đếm riêng `RULES.livenessProbe` 30/giờ/SV. Nonce purpose `card` + challenge bọc `{kind:'liveness_probe'}` (tránh migration enum) → không dùng chéo được. Trang `/sv/the-sinh-vien/debug` → "Thử liveness (không tốn lượt)". Đã chạy trên Preview + iPhone (người dùng báo).
@@ -59,10 +69,12 @@
 - Token `gh` thiếu quyền `workflow` → push sửa `.github/workflows/*` qua Git Credential Manager (`git -c credential.helper= -c credential.helper=manager push`). CI tự chạy trên `pull_request` (sự cố không chạy 2026-11-07 đã tự hết).
 
 ### 6. Việc tiếp theo (theo thứ tự)
-1. PR #2: thử "Thử liveness (không tốn lượt)" trên **Android** (vài lượt, cả hai thứ tự thử thách) + một lần đăng ký thẻ thật với ngưỡng 0,22 → ghi vào research R2 → người dùng merge. Đổi ngưỡng: sửa `face-yaw-thresholds.ts`, test bất biến biên phải còn xanh.
-2. Sau khi PR #2 merge: **Phase 5 US2 check-in** trên nhánh `001-us2-checkin`; route check-in dùng lại `@utc/shared/face-yaw` + `face/liveness.ts`, `use-camera`, `FaceChallenge`, `card-errors`, (CSP wasm đã có sẵn cho toàn khu `/sv/*`).
-3. T145 tối ưu thời gian đăng ký thẻ; T009 đo thêm mẫu + bộ nhớ.
-4. Polish: T144 Turnstile; nâng action Node 20; cron dọn ảnh hết hạn; cảnh báo `jose` (Edge) ở middleware.
+1. Review + merge PR US2 lượt 1. Áp migration **0005** lên Supabase PREVIEW rồi PROD (`db:migrate`, `CONFIRM_REMOTE_DB=true`) TRƯỚC khi deploy code dùng `gps_anomaly`.
+2. **US2 lượt 2 — UI**: T078 GV "Mở điểm danh" (lấy GPS, cảnh báo > 50 m), T079 đánh dấu lớp đang mở (`openWindow`), T080 màn điểm danh (`FaceChallenge`, lớp phủ giờ/địa chỉ qua `/api/geo/reverse`, gửi 3 khung + vị trí, kết quả), T083 client báo lỗi, T068 e2e. Dùng lại `use-camera`, `FaceChallenge`, `card-errors`, `yaw-debug` (nonce trả `yawDebug`).
+3. Trên Preview: đo `checkin_timing` (p95 ≤ 5 s?) + kiểm đóng dấu ảnh (fontconfig/font trên Vercel) + Goong (cần `GOONG_API_KEY` ở Preview/Production).
+4. Còn từ PR #2: "Thử liveness" + đăng ký thẻ trên **Android** (chưa đo lần nào).
+5. T145 tối ưu thời gian đăng ký thẻ; T009 đo thêm mẫu + bộ nhớ.
+6. Polish: T144 Turnstile; nâng action Node 20; cron dọn ảnh hết hạn; cảnh báo `jose` (Edge) ở middleware.
 
 ### 7. Quy ước làm việc
 - **Viết test trước**, chạy thấy FAIL rồi mới cài đặt.

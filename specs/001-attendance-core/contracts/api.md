@@ -47,41 +47,50 @@ Lỗi chung của 2 API nhập file: 411 `LENGTH_REQUIRED` (thiếu `content-len
 
 | Method | Path | Quyền | Body → Response |
 |---|---|---|---|
-| GET | `/api/classes/{id}/sessions/today` | 🅖 | Buổi theo lịch hôm nay (tiết, giờ, phòng) |
-| POST | `/api/classes/{id}/sessions/open-checkin` | 🅖 | `{date?, firstPeriod?, lastPeriod?, room?, kind:'scheduled'|'makeup', lat, lng, accuracyM, checkinMinutes?}` → `{session, checkinWindow, checkoutWindow}`. Cảnh báo `LOW_GPS_ACCURACY` nếu accuracy > 50 m |
-| PATCH | `/api/sessions/{id}` | 🅖 | `{room?, checkoutSkipped?}` — đổi phòng (trước `endsAt`), bỏ check-out |
-| POST | `/api/sessions/{id}/spot-check` | 🅖 | `{minutes?}` → window |
-| POST | `/api/windows/{id}/close` | 🅖 | Đóng sớm |
+| GET | `/api/classes/{id}/sessions/today` | 🅖 | → `{sessions:[{sessionId|null, kind, firstPeriod, lastPeriod, startsAt, endsAt, room, checkoutSkipped, windows:[{id, type, opensAt, closesAt, closedEarlyAt, radiusM, open}]}]}` — lịch hôm nay (giờ theo bảng tiết trong DB) + buổi học bù đã mở; lớp ngoài thời gian học → `[]` |
+| POST | `/api/classes/{id}/sessions/open-checkin` | 🅖 | `{kind?:'scheduled'|'makeup' (mặc định scheduled), date? (phải là hôm nay), firstPeriod?, lastPeriod?, room?, lat, lng, accuracyM, checkinMinutes? 1–60, radiusM? 10–500}` (strict) → 201 `{session:{id, date, firstPeriod, lastPeriod, startsAt, endsAt, room, kind, checkoutSkipped, center}, checkinWindow, checkoutWindow, warnings}`. Theo lịch: không chỉ định tiết → buổi chưa kết thúc sớm nhất hôm nay; học bù: bắt buộc tiết đầu/cuối. Khung check-in `[lúc mở, + checkinMinutes (mặc định của lớp))` — "muộn" tính từ lúc mở; khung check-out tạo luôn `[kết thúc tiết cuối − offsetBefore, + offsetAfter]`. `warnings: ['LOW_GPS_ACCURACY']` khi accuracy > 50 m (vẫn mở). 409 `CHECKIN_EXISTS` (buổi đã mở) / `SESSION_ENDED`; 422 `NO_SCHEDULE` / `OUTSIDE_CLASS_DATES` / `DATE_NOT_TODAY` / `VALIDATION_ERROR`. Audit `session.open_checkin` |
+| PATCH | `/api/sessions/{id}` | 🅖 | `{room?, checkoutSkipped?}` (ít nhất một) → `{session}` — đổi phòng / bỏ check-out trước `endsAt` (409 `SESSION_ENDED`); audit `session.update` (cũ → mới). Bỏ check-out → khung check-out coi như đóng (410 với SV) |
+| POST | `/api/sessions/{id}/spot-check` | 🅖 | `{minutes? 3–5, mặc định 5}` → 201 `{window}` (tâm + bán kính như check-in). 409 `SPOT_CHECK_OPEN` (đang có khung đột xuất) / `CHECKIN_NOT_OPENED` / `SESSION_ENDED`. Audit `session.spot_check` |
+| POST | `/api/windows/{id}/close` | 🅖 | Đóng sớm khung đang mở → `{window}`; 409 `WINDOW_NOT_OPEN`. Audit `window.close` |
 
 ## 5. Sinh viên: thẻ & điểm danh
 
 | Method | Path | Quyền | Body → Response |
 |---|---|---|---|
 | POST | `/api/student/consent` | 🅢 | `{version}` → 204. Lưu `consent_at` + `consent_version`; phiên bản phải bằng `CONSENT_VERSION` (`@utc/shared/consent`), sai → 422 `CONSENT_VERSION_MISMATCH`. Mọi API thẻ/khuôn mặt của SV trả 403 `CONSENT_REQUIRED` khi chưa đồng ý đúng phiên bản hiện hành |
-| GET | `/api/geo/reverse?lat=&lng=` | 🅢 | Địa chỉ cho lớp phủ camera từ toạ độ của chính SV (cache ô 4 chữ số, rate limit 6/phút/SV); không trả gì về vị trí giảng viên (FR-031) |
-| GET | `/api/student/classes` | 🅢 | → `{classes:[{classId, code, courseName, room, openWindow:{id, type, closesAt}|null}]}` — ghi danh `active`, lớp chưa qua ngày kết thúc; cần đã đồng ý (403 `CONSENT_REQUIRED`). `openWindow` luôn `null` tới khi có check-in (US2) |
+| GET | `/api/geo/reverse?lat=&lng=` | 🅢 | → `{address: string|null}` — địa chỉ cho lớp phủ camera từ toạ độ của chính SV (Goong, cache ô 4 chữ số ~11 m, chỉ gửi toạ độ đã làm tròn ra ngoài; thiếu `GOONG_API_KEY`/lỗi/quá 1,5 s → `null`). Cần đã đồng ý; rate limit 6/phút/SV (đếm cả lượt toạ độ sai → 422). Không trả gì về vị trí giảng viên (FR-031) |
+| GET | `/api/student/classes` | 🅢 | → `{classes:[{classId, code, courseName, room, openWindow:{id, type, closesAt, done}|null}]}` — ghi danh `active`, lớp chưa qua ngày kết thúc; cần đã đồng ý (403 `CONSENT_REQUIRED`). `openWindow`: khung đang mở của lớp (ưu tiên check-in → đột xuất → check-out); khung check-out/đột xuất chỉ hiện khi SV đã check-in hợp lệ/nghi vấn trong buổi (check-out bị bỏ thì không hiện); `done` = đã có lượt hợp lệ/nghi vấn trong khung |
 | POST | `/api/student/card/nonce` | 🅢 | → `{nonce, expiresAt, challenge}` — `challenge` là `['left','right']` hoặc `['right','left']` (thử thách quay đầu ngẫu nhiên, FR-045a); nonce 2 phút, dùng một lần. **Chỉ preview/dev** (`VERCEL_ENV=preview`/`development` hoặc `pnpm dev`): thêm `yawDebug: true` — production không có trường này. 403 `CONSENT_REQUIRED` / `NOT_ENROLLED`; 409 `CARD_ALREADY_REGISTERED` / `CARD_PENDING_REVIEW`; 429 (6/phút) |
 | GET | `/api/student/card` | 🅢 | → `{card:{status:'active'|'pending_review'|'rejected'|'reset', registeredAt}|null}` — `rejected` = giảng viên từ chối, `reset` = giảng viên/Admin đặt lại (cả hai: đăng ký lại được). Không có ảnh, embedding, lý do chờ duyệt hay ghi chú của giảng viên |
 | POST | `/api/student/card` | 🅢 | multipart `{nonce, image, frames×3}`: `image` = ảnh thẻ (JPEG/PNG/WebP/HEIC ≤ 1 MB); `frames` = 3 khung mặt trực tiếp theo `challenge` — [hướng 1, nhìn thẳng, hướng 2], mỗi khung ≤ 1 MB; tổng ≤ 4 MB. **Công cụ so sánh yaw (chỉ preview/dev, khi nonce có `yawDebug: true`)**: client gửi thêm `clientYaw` = JSON `[số|null ×3]` (yaw MediaPipe lúc chụp); 201 và lỗi liveness (`LIVENESS_FAILED` / `LIVE_NO_FACE` / `LIVE_MULTIPLE_FACES`) kèm `yawDebug = {thresholds:{server,client}, reason: mã lỗi | 'SAME_PERSON_FAILED' | null, frames:[{frame, expected, faces, serverYaw, serverPose, clientYaw, ok}]}` — `thresholds` lấy từ `@utc/shared/face-yaw-thresholds` (hiện tại server `{centerMax: 0.18, turnMin: 0.22, turnMax: 0.8}`, client `{centerMax: 0.12, turnMin: 0.4, turnMax: 0.65}`; |yaw| ≤ centerMax thẳng · turnMin–turnMax quay hợp lệ · > turnMax quá mạnh); production bỏ qua `clientYaw`, không trả, không log. → 201 `{status:'active'|'pending_review', decodedCode}` (không trả lý do chờ duyệt). Thứ tự: đồng ý → thuộc lớp → chưa có thẻ → nonce → rate limit 6/giờ/SV → sanitize (bỏ EXIF) → mã vạch/OCR → chân dung → liveness 3 khung → so mặt trực tiếp ↔ chân dung thẻ → trùng 1:N → **chỉ khi qua hết mới lưu ảnh thẻ + chân dung**; khung mặt trực tiếp không bao giờ được lưu; thẻ bị từ chối không lưu file, không ghi DB. Chờ duyệt (`review_reasons`): `DUPLICATE_FACE`, `LIVE_MISMATCH` (cosine < `CARD_ACCEPT_ABOVE`), `NAME_MISMATCH`. 422 `CODE_MISMATCH` / `UNREADABLE` / `NO_PORTRAIT` / `MULTIPLE_FACES` / `LIVENESS_FAILED` / `LIVE_NO_FACE` / `LIVE_MULTIPLE_FACES` / `UNSUPPORTED_TYPE` / `VALIDATION_ERROR` (không đủ 3 khung); 403 `BAD_NONCE`; 413 ảnh > 1 MB hoặc tổng > 4 MB; 429 khi hết lượt; 503 `STORAGE_BUCKET_MISSING` / `STORAGE_UNAVAILABLE` / `OCR_UNAVAILABLE` (lỗi phía server đã phân loại — **lượt được hoàn**). Lượt: **6/giờ/SV** (hoàn khi 503 đã phân loại; lỗi 500 không phân loại thì không hoàn) + **trần tổng 20/giờ/SV** tính mọi lượt kể cả lượt được hoàn. Mọi lỗi sau khi đã tính lượt (trừ 500 không phân loại) kèm `error.remainingAttempts` = min(6 − lượt đã tính, 20 − tổng) (429 → 0); lỗi trước đó (chưa đồng ý, nonce sai) không tiêu lượt |
 | POST | `/api/student/liveness-probe/nonce` | 🅢 | **Chỉ preview/dev** (production **404** `NOT_FOUND`). → `{nonce, expiresAt, challenge}` — cần đã đồng ý (403 `CONSENT_REQUIRED`), không cần thuộc lớp / chưa có thẻ; 429 (6/phút). Nonce purpose `card` với challenge bọc `{kind:'liveness_probe', challenge}` → không dùng được cho đăng ký thẻ (403 `BAD_NONCE`) và ngược lại |
 | POST | `/api/student/liveness-probe` | 🅢 | **Chỉ preview/dev** (production **404**). multipart `{nonce, frames×3, clientYaw?}` → 200 `{passed, yawDebug}` (cấu trúc `yawDebug` như đăng ký thẻ). Chạy đúng pipeline liveness của đăng ký thẻ, không cần ảnh thẻ; **không lưu** ảnh / embedding / dòng DB / audit; **không trừ lượt đăng ký thẻ** — bộ đếm riêng **30/giờ/SV** (429). 403 `BAD_NONCE`; 413/422 như khung mặt của đăng ký thẻ |
-| POST | `/api/windows/{id}/scan-nonce` | 🅢 | → `{nonce, challenge:['left','right'], expiresAt}` (2 phút). 403 `NOT_ENROLLED` / `NO_CHECKIN` / 409 `ALREADY_DONE` / 410 `WINDOW_CLOSED` / 412 `CARD_REQUIRED` |
-| POST | `/api/windows/{id}/events` | 🅢 | multipart `{nonce, frames[3] (jpeg), lat, lng, accuracyM}` → xem dưới |
+| POST | `/api/windows/{id}/scan-nonce` | 🅢 | → `{nonce, expiresAt, challenge:['left'|'right', …], scanSessionId (= nonce), attemptsLeft, window:{id, type, closesAt, classCode, courseName, room}, yawDebug?}` (nonce 2 phút, dùng một lần, gắn khung; tạo `scan_sessions`). **Không trả tâm/bán kính** (Constitution I). Thứ tự kiểm: đồng ý (403 `CONSENT_REQUIRED`) → khung tồn tại (404) → thuộc lớp (403 `NOT_ENROLLED`) → thẻ (412 `CARD_REQUIRED` / `CARD_PENDING_REVIEW` "đang chờ giảng viên duyệt") → khung mở (410 `WINDOW_CLOSED`; check-out bị bỏ cũng 410) → đã check-in (403 `NO_CHECKIN`, chỉ check-out/đột xuất) → chưa xong (409 `ALREADY_DONE`) → còn lượt (409 `ATTEMPTS_EXHAUSTED`) → rate limit 6/phút/SV. `yawDebug: true` chỉ ở preview/dev |
+| POST | `/api/windows/{id}/events` | 🅢 | multipart `{nonce, frames×3 (khung thử thách: hướng 1, thẳng, hướng 2; mỗi khung ≤ 1 MB, tổng ≤ 4 MB), lat, lng, accuracyM, clientYaw? (preview/dev)}` → 200 (xem dưới). Chặn trước khi đọc/xử lý ảnh: đồng ý (403) → độ dài body (411/413, body không được đọc) → nonce đúng SV + đúng khung (403 `BAD_NONCE`) → rate limit 12/10 phút/SV (429) → toạ độ hợp lệ (422). 412 `CARD_REQUIRED` nếu thẻ bị đặt lại giữa chừng; 409 `ALREADY_DONE` (đã có lượt hợp lệ/nghi vấn — không tạo lượt mới, kể cả khi 2 lượt gửi cùng lúc). Mọi lượt có kết luận (kể cả `retry`, từ chối do khung đóng) đều ghi `attendance_events` + hồ sơ `attendance-record.v1` |
 
-Response tạo lượt:
+Response tạo lượt (200):
 
 ```json
 {
+  "eventId": "uuid",
   "result": "valid | suspect | rejected | retry",
-  "reason": "ok | out_of_range | card_mismatch | card_borderline | duplicate_face | checkin_mismatch | liveness_failed | low_accuracy | no_face | multiple_faces",
-  "distanceM": 23.4,
+  "reason": "ok | out_of_range | low_accuracy | no_face | multiple_faces | liveness_failed | card_mismatch | window_closed | not_enrolled | no_checkin | attempts_exhausted | null",
+  "message": "thông báo tiếng Việt cho SV",
   "serverTime": "2026-11-14T00:07:12Z",
+  "distanceM": 23.4,
   "attemptsLeft": 2,
-  "evidenceUrl": "https://…signed (5 phút)"
+  "lateMinutes": 7.5,
+  "evidenceUrl": "https://…signed (5 phút) | null",
+  "yawDebug": "chỉ preview/dev"
 }
 ```
 
-`retry` không tiêu tốn lượt thử (sai số GPS lớn, không thấy mặt, nhiều mặt).
+- `suspect` → `reason: null` + thông báo "cần giảng viên xem lại": SV **không** thấy lý do nghi vấn (`card_borderline`, `checkin_mismatch`, `duplicate_face`, `gps_anomaly` — GV xem trong hồ sơ), như đăng ký thẻ.
+- `lateMinutes` chỉ với check-in hợp lệ/nghi vấn: thời điểm lượt − lúc GV mở check-in. `evidenceUrl` chỉ khi ảnh được lưu (hợp lệ/nghi vấn).
+- Trùng mặt với mã khác trong cùng khung (DUPLICATE_ABOVE) → lượt này `suspect/duplicate_face` VÀ các lượt kia chuyển `suspect` (`duplicate_of` hai chiều, `record.followUps`, audit `attendance.flag_duplicate`) trong cùng transaction có khoá theo khung. Check-out/đột xuất khác mặt lượt check-in (< CHECKIN_MATCH_ABOVE) → cả hai `suspect/checkin_mismatch`.
+- Ảnh bằng chứng (khung nhìn thẳng, đóng dấu giờ server + địa chỉ/toạ độ + lớp + phòng) và vector chỉ lưu với lượt hợp lệ/nghi vấn, bucket private `evidence/{sessionId}/{windowId}/{eventId}.jpg`, xoá sau 7 ngày (`purge_after`); khung liveness không lưu. Hồ sơ giữ tới hết ngày kết thúc lớp + 30 ngày.
+
+`retry` không tiêu tốn lượt thử (sai số GPS lớn, không thấy mặt, nhiều mặt). Tối đa **3 lượt bị từ chối**/khung (chỉ `out_of_range`, `liveness_failed`, `card_mismatch` — lỗi của khung như `window_closed` không tính); hết lượt → nonce 409 `ATTEMPTS_EXHAUSTED`.
 
 ## 6. Bảng điểm danh, lọc, xuất
 
@@ -111,7 +120,7 @@ Response tạo lượt:
 
 | Method | Path | Quyền | Mô tả |
 |---|---|---|---|
-| POST | `/api/scan-sessions/{id}/client-error` | 🅢 | `{code, detail}` — lỗi thiết bị (FR-111) |
+| POST | `/api/scan-sessions/{id}/client-error` | 🅢 | `{code: 'camera_denied'|'geo_denied'|'network'|'timeout'|'camera_unavailable'|'model_failed', detail? ≤ 200}` → 204 — lỗi thiết bị vào phiên quét của CHÍNH SV (phiên người khác → 404), tối đa 20 mục/phiên; cần đã đồng ý; rate limit 20/10 phút/SV (FR-111) |
 | GET | `/api/sessions/{id}/students/{studentId}/records` | 🅖 | Dòng thời gian `{scanSessions[], events:[{record, narrative}]}` |
 | GET | `/api/classes/{id}/records/export?scope=cell|session|class&format=json|txt` | 🅖 | Tải hồ sơ (FR-118) |
 | POST | `/api/student/disputes` | 🅢 | `{sessionId, message, attachment?}` |
