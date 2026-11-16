@@ -2,7 +2,7 @@
 
 ## Trạng thái & quy ước
 
-*Cập nhật 2026-11-16 (trước compact). Đọc file này trước khi làm tiếp; kiểm lại repo/PR nếu nghi ngờ thông tin đã cũ. "(người dùng báo)" = sự thật do người dùng kiểm, không kiểm được từ repo.*
+*Cập nhật 2026-11-16. Đọc file này trước khi làm tiếp; kiểm lại repo/PR nếu nghi ngờ thông tin đã cũ. "(người dùng báo)" = sự thật do người dùng kiểm, không kiểm được từ repo.*
 
 ### 1. Dự án
 - Hệ thống điểm danh sinh viên Trường ĐH Giao thông Vận tải (UTC) bằng khuôn mặt + GPS; giao diện tiếng Việt.
@@ -11,7 +11,7 @@
 
 ### 2. Kiến trúc & hạ tầng
 - Monorepo pnpm 10, Node 22. Phụ thuộc một chiều: `apps/web` → `packages/backend` → `packages/database` → `packages/shared`.
-  - `apps/web`: Next.js 15 App Router. Route `src/app/api/**/route.ts` chỉ một dòng `export { … } from "@utc/backend/api/…"` (authz-matrix kiểm tự động). Test client: `apps/web/tests/unit` (vitest).
+  - `apps/web`: Next.js 15 App Router. Route `src/app/api/**/route.ts` chỉ một dòng `export { … } from "@utc/backend/api/…"` (authz-matrix kiểm tự động). Test client: `apps/web/tests/unit` (vitest); e2e `apps/web/tests/e2e` (Playwright, Chromium đã cài trên máy này) — `csp-wasm.spec.ts` PHẢI chạy với bản build production (`pnpm build` → `ALLOW_LOCAL_PGLITE=1 next start -p 3100` → `E2E_BASE_URL=http://localhost:3100 playwright test csp-wasm`; dev có `'unsafe-eval'` nên không phân biệt được). CI chưa chạy e2e.
   - `packages/backend`: nghiệp vụ + handler `src/api/**` tạo bằng `route({ roles, body })`.
   - `packages/database`: Drizzle schema, migration SQL (0000–0004), `getDb()`; `DATABASE_URL=pglite:./.pglite` → PGlite cho dev; test dùng `@utc/database/testing`.
   - `packages/shared`: tiết/ca/giờ VN, tiếng Việt (`namesMatch`), văn bản đồng ý (`consent.ts`), **yaw dùng chung client+server** (`face-yaw.ts`), mô hình đầu tổng hợp cho test (`head-model.ts`).
@@ -31,7 +31,7 @@
 | 4 US6 thẻ SV | 12/12 | Backend trên `main` (PR #1); UI T062/T063 + các sửa sau thử thật trên PR #2 |
 | 5–11 (US2, US3, US5, US4, US9, US8, US7) | 0 | |
 | 12 Polish | 0/15 | T144 (Turnstile), T145 (tối ưu thời gian đăng ký thẻ) |
-- Test (lần chạy gần nhất, `2dfde49`): backend **484**, database **51**, shared **32**, web **101** — tổng 668, đều pass; `typecheck`, `lint`, `build`, `check:traces` pass; CI (`check`, `codeql`) xanh.
+- Test (lần chạy gần nhất, `85321c1`): backend **504**, database **51**, shared **32**, web **104** — tổng 691 (+ e2e `csp-wasm` 2/2), đều pass; `typecheck`, `lint`, `build`, `check:traces` pass; CI (`check`, `codeql`) xanh.
 
 ### 4. Quyết định đã chốt
 - Body request ≤ **4 MB**: danh sách lớp 4 MB, ảnh thẻ 1 MB, mỗi khung mặt 1 MB (FR-090, FR-100, R14).
@@ -41,7 +41,7 @@
 - Đăng ký thẻ (FR-045…049, FR-045a): mã vạch, OCR dự phòng (zxing `tryRotate` + `tryInvert`; **OCR xoay 90°/270° chỉ khi mã vạch hỏng**; OCR lỗi + có mã vạch → vẫn đăng ký, GV thấy `nameUnverified`; không mã vạch → 503 `OCR_UNAVAILABLE`) + mặt trực tiếp 3 khung theo thử thách quay đầu. **6 lượt/giờ**, **hoàn lượt** khi 503 đã phân loại (`STORAGE_BUCKET_MISSING`, `STORAGE_UNAVAILABLE`, `OCR_UNAVAILABLE`; không hoàn 500 không phân loại) + **trần tổng 20 lượt/giờ** (kể cả lượt hoàn); `remainingAttempts` = min(6 − lượt, 20 − tổng).
 - **Ngưỡng ảnh thẻ** (cạnh dài vùng cắt, px gốc): < 500 **chặn**; 500–999 **cảnh báo** + "Vẫn dùng ảnh này"; ≥ 1000 ổn. Thẻ UTC là **thẻ DỌC** (khung CR80 54:85,6 cao 80 % vùng xem).
 - **Yaw** — công thức chung `@utc/shared/face-yaw`: kẹp(5 × (mũi.x − tâm 2 mắt.x) / **bề rộng bbox**, −1, 1) (công thức cũ chia khoảng cách 2 mắt → -41 và đổi dấu khi quay mạnh). Ngưỡng sơ bộ: **server** thẳng ≤ 0,18 · quay 0,30–0,80 · > 0,80 quá mạnh (không hợp lệ → `LIVENESS_FAILED`); **client** thẳng ≤ 0,12 · quay 0,40–0,65 · > 0,65 "Quay vừa phải". Client chỉ hướng dẫn + tự chụp (ổn định ~300 ms; quá 10 s nhắc lại + nút đếm ngược; model lỗi/ > 15 s → đếm ngược) — **server quyết định**.
-- **CSP** `'wasm-unsafe-eval'` **theo route**: chỉ `/sv/the-sinh-vien*` (`needsWasm` / `WASM_PATH_PREFIXES` trong `packages/backend/src/security/headers.ts`). CSP gắn với document → điều hướng băng qua ranh giới dùng `AppLink`/`useAppNavigate` (tải document mới), không dùng `next/link`/`router.push` trực tiếp. **Đề xuất (CHƯA làm)**: chuyển sang toàn khu `/sv/*` và bỏ `AppLink`.
+- **CSP** `'wasm-unsafe-eval'` **cho toàn khu SV `/sv/*`** (`needsWasm` / `WASM_AREA_PREFIX` trong `packages/backend/src/security/headers.ts`, `4f12c35`). `/sv` (đăng nhập SV), `/gv`, `/admin`, `/login`, `/api` giữ CSP chặt. Trong khu SV dùng `next/link`/`router` bình thường (đã xoá `AppLink`/`useAppNavigate`/`csp-navigation`); chỉ **đăng nhập SV** và **đăng xuất** tải document mới (`window.location.replace`). Route SV mới (check-in) tự có wasm.
 - Ngưỡng thời gian (T012): **đăng ký thẻ p95 ≤ 10 s** (một lần, có màn tiến trình) · **điểm danh p95 ≤ 5 s**.
 - Ngưỡng nhận diện chờ T011: `DUPLICATE_ABOVE` 0,45 · `CARD_ACCEPT_ABOVE` 0,5 · chân dung ≥ 40 px, độ nét 0,02.
 - Ảnh thẻ + chân dung **chỉ upload sau khi qua hết kiểm tra**; upload lỗi → dọn file, không dòng DB/audit; khung mặt trực tiếp không bao giờ lưu (FR-051). Trùng mặt / mặt lệch thẻ / tên lệch → `pending_review`, SV không biết lý do; SV chỉ thấy `active`/`pending_review`/`rejected`/`reset`.
@@ -54,12 +54,13 @@
 - PR #1 **đã merge** vào `main` (2026-11-09). **PR #2** (`001-us6-ui` → `main`, UI US6 T062/T063 + sửa sau thử thật) **đang mở, CHƯA merge**.
 - **(người dùng báo) Thử iPhone thật** (iOS 18.4 Safari, 4G, thẻ UTC thật): đăng ký thẻ thành công; camera sau 1440×2560, `takePhoto` 2160×3840, vùng thẻ 1046×1658; Vercel 201 = 6,84 s, 422 = 4,97 s; MediaPipe tải 4,17 MB (gzip OK), khởi tạo ~4,5–6,7 s lần đầu; tự chụp hoạt động; header hamburger OK. Android chưa thử; bộ nhớ function chưa đo.
 - **Yaw mới CHƯA kiểm trên mặt thật**: lần thử iPhone gần nhất chạy trên bản deploy CŨ (ngưỡng client 0,08/0,28, công thức chia khoảng cách mắt) — client báo "Giữ yên" + tự chụp nhưng server trả `LIVENESS_FAILED` 2 lần. Cần thử lại trên deploy mới nhất (`/sv/the-sinh-vien/debug` → "Thử bộ hướng dẫn khuôn mặt").
+- **Thử liveness không tốn lượt ĐÃ LÀM** (`1e0fc56` tách `card/live.ts`, `85321c1`): `POST /api/student/liveness-probe/nonce` + `POST /api/student/liveness-probe` (`card/liveness-probe.ts`) — chỉ khi `yawDebugEnabled()`, production 404; cần đồng ý; đúng pipeline liveness của đăng ký thẻ, không ảnh thẻ, không lưu gì; bộ đếm riêng `RULES.livenessProbe` 30/giờ/SV. Nonce purpose `card` + challenge bọc `{kind:'liveness_probe'}` (tránh migration enum) → không dùng chéo được. Trang `/sv/the-sinh-vien/debug` → "Thử liveness (không tốn lượt)". **Chưa thử trên Preview/điện thoại.**
 - **Công cụ so sánh yaw client ↔ server ĐÃ LÀM** (`2dfde49`, `packages/backend/src/face/yaw-debug.ts`, `apps/web/src/lib/student/yaw-debug.ts`): bật khi `VERCEL_ENV=preview`/`development` hoặc `pnpm dev` (fail closed). Nonce trả `yawDebug: true` → client gửi `clientYaw` → 201/lỗi liveness kèm `yawDebug` (yaw SCRFD từng khung, tư thế, lý do, `SAME_PERSON_FAILED`); bảng hiện ở màn làm lại khuôn mặt + màn kết quả. **Chưa thử trên Vercel Preview/điện thoại thật** (cần xác nhận `VERCEL_ENV` có ở runtime function).
 - Token `gh` thiếu quyền `workflow` → push sửa `.github/workflows/*` qua Git Credential Manager (`git -c credential.helper= -c credential.helper=manager push`). CI tự chạy trên `pull_request` (sự cố không chạy 2026-11-07 đã tự hết).
 
 ### 6. Việc tiếp theo (theo thứ tự)
-1. PR #2: thử lại trên iPhone (+ Android) với yaw mới + bảng so sánh yaw (deploy Preview mới nhất) → hiệu chỉnh ngưỡng → (cân nhắc CSP toàn khu `/sv/*`) → người dùng merge.
-2. Sau khi PR #2 merge: **Phase 5 US2 check-in** trên nhánh `001-us2-checkin`; route check-in dùng lại `@utc/shared/face-yaw` + `face/liveness.ts`, `use-camera`, `FaceChallenge`, `card-errors`, và **cần CSP wasm** (thêm vào `WASM_PATH_PREFIXES` hoặc CSP toàn khu `/sv/*`).
+1. PR #2: trên deploy Preview mới nhất, `/sv/the-sinh-vien/debug` → "Thử liveness (không tốn lượt)" trên iPhone (+ Android), ghi bảng yaw client ↔ server → hiệu chỉnh ngưỡng → người dùng merge.
+2. Sau khi PR #2 merge: **Phase 5 US2 check-in** trên nhánh `001-us2-checkin`; route check-in dùng lại `@utc/shared/face-yaw` + `face/liveness.ts`, `use-camera`, `FaceChallenge`, `card-errors`, (CSP wasm đã có sẵn cho toàn khu `/sv/*`).
 3. T145 tối ưu thời gian đăng ký thẻ; T009 đo thêm mẫu + bộ nhớ.
 4. Polish: T144 Turnstile; nâng action Node 20; cron dọn ảnh hết hạn; cảnh báo `jose` (Edge) ở middleware.
 
