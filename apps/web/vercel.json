@@ -7,6 +7,9 @@
   "functions": {
     "src/app/api/student/card/route.ts": {
       "maxDuration": 60
+    },
+    "src/app/api/student/liveness-probe/route.ts": {
+      "maxDuration": 60
     }
   }
 }

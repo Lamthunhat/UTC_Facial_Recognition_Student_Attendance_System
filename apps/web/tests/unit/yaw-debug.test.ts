@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clientYawField, parseYawDebug, yawDebugRows, yawReasonText } from "@/lib/student/yaw-debug";
+import { clientYawField, parseProbeResult, parseYawDebug, yawDebugRows, yawReasonText } from "@/lib/student/yaw-debug";
 
 /**
  * Công cụ so sánh yaw client ↔ server (CHỈ preview/dev — server quyết định bật qua nonce `yawDebug: true`).
@@ -64,5 +64,14 @@ describe("clientYawField — trường form gửi kèm khung", () => {
   });
   it("NaN / vô cực → null", () => {
     expect(clientYawField([Number.NaN, Infinity, 0])).toBe("[null,null,0]");
+  });
+});
+
+describe("parseProbeResult — phản hồi POST /api/student/liveness-probe (trang chẩn đoán)", () => {
+  it("{passed, yawDebug} hợp lệ", () => {
+    expect(parseProbeResult({ passed: false, yawDebug: report })).toEqual({ passed: false, report });
+  });
+  it.each([[null], [{ passed: "yes", yawDebug: report }], [{ passed: true }], [{ passed: true, yawDebug: { frames: [] } }]])("không hợp lệ %j → null", (v) => {
+    expect(parseProbeResult(v)).toBeNull();
   });
 });

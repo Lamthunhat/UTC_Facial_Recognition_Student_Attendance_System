@@ -35,6 +35,8 @@ export const RULES = {
   cardRegister: { limit: 6, windowSec: 3600 },
   /** Trần tổng đăng ký thẻ/giờ/SV — đếm MỌI lượt đã qua nonce, kể cả lượt được hoàn (chặn lặp vô hạn khi server lỗi). */
   cardRegisterTotal: { limit: 20, windowSec: 3600 },
+  /** Thử liveness (chỉ preview/dev, card/liveness-probe.ts): bộ đếm RIÊNG, không đụng lượt đăng ký thẻ. */
+  livenessProbe: { limit: 30, windowSec: 3600 },
   leaveExtract: { limit: 10, windowSec: 3600 },
   assistant: { limit: 20, windowSec: 3600 },
   export: { limit: 30, windowSec: 3600 },

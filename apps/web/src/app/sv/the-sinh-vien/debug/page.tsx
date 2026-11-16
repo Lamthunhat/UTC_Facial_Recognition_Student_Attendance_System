@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { FaceProbe } from "@/components/camera/face-probe";
+import { LivenessProbe } from "@/components/camera/liveness-probe";
 import { useCamera } from "@/components/camera/use-camera";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/input";
@@ -12,7 +13,7 @@ import { detectInAppBrowser } from "@/lib/student/webview";
 /**
  * Chẩn đoán camera cho việc chụp thẻ (thử trên điện thoại thật): môi trường trình duyệt, độ phân giải luồng camera sau,
  * khả năng ImageCapture, cạnh dài vùng thẻ sẽ cắt ra. CHỈ đo trên máy — không gửi, không lưu ảnh (ảnh takePhoto chỉ đọc
- * kích thước rồi huỷ ngay).
+ * kích thước rồi huỷ ngay). Riêng mục "Thử liveness" (chỉ preview/dev) gửi 3 khung mặt lên server để chấm — server không lưu.
  */
 type Row = [string, string];
 
@@ -76,7 +77,9 @@ export default function CameraDebugPage() {
   return (
     <section className="flex flex-col gap-4">
       <h1 className="text-xl font-semibold">Chẩn đoán camera</h1>
-      <p className="text-sm text-muted-foreground">Chỉ đo trên máy của bạn — không gửi hay lưu ảnh nào.</p>
+      <p className="text-sm text-muted-foreground">
+        Các phép đo chạy trên máy của bạn, không gửi ảnh — trừ mục “Thử liveness” (gửi 3 khung để server chấm, không lưu).
+      </p>
       {table(env)}
       <div className="relative aspect-[3/4] w-full overflow-hidden rounded-lg bg-black sm:aspect-video">
         <video ref={videoRef} className="absolute inset-0 size-full object-cover" playsInline muted autoPlay aria-label="Camera sau" />
@@ -100,6 +103,7 @@ export default function CameraDebugPage() {
       {cam.length > 0 && table(cam)}
       {photo && <p className="text-sm">{photo}</p>}
       <FaceProbe />
+      <LivenessProbe />
     </section>
   );
 }

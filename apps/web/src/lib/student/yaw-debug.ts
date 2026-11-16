@@ -106,3 +106,11 @@ export function yawReasonText(reason: YawDebugReason | null): string {
 export function clientYawField(yaws: (number | null)[]): string {
   return JSON.stringify(yaws.map((y) => (y !== null && Number.isFinite(y) ? Math.round(y * 1000) / 1000 : null)));
 }
+
+/** Phản hồi POST /api/student/liveness-probe (trang chẩn đoán, chỉ preview/dev). Sai dạng → null. */
+export function parseProbeResult(v: unknown): { passed: boolean; report: YawDebugReport } | null {
+  if (!v || typeof v !== "object") return null;
+  const { passed, yawDebug } = v as Record<string, unknown>;
+  const report = parseYawDebug(yawDebug);
+  return typeof passed === "boolean" && report ? { passed, report } : null;
+}
