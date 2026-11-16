@@ -9,6 +9,7 @@ import type { SessionClaims } from "../auth/jwt";
 import { removeObjects, signedUrl, uploadObject, type Bucket } from "../evidence/storage";
 import { checkLiveFrames, isChallenge, LIVENESS_RULES, samePerson, type Challenge, type LiveFrameError } from "../face/liveness";
 import { cosine } from "../face/similarity";
+import { parseClientYaw, yawDebugEnabled, yawDebugReport, type YawDebugReport } from "../face/yaw-debug";
 import { HttpError, tooManyRequests } from "../http/errors";
 import { log } from "../log";
 import { consumeNonce, issueNonce } from "../security/nonce";
@@ -118,7 +119,8 @@ export async function issueCardNonce(session: SessionClaims) {
   // Thử thách quay đầu ngẫu nhiên (research R2): chặn phát lại video/ảnh quay sẵn.
   const challenge: Challenge = randomInt(2) === 0 ? ["left", "right"] : ["right", "left"];
   const n = await issueNonce(session.sub, "card", { challenge });
-  return { nonce: n.nonce, expiresAt: n.expiresAt, challenge };
+  // Preview/dev: báo client gửi kèm yaw lúc chụp để so với server (face/yaw-debug.ts). Production: không có trường này.
+  return { nonce: n.nonce, expiresAt: n.expiresAt, challenge, ...(yawDebugEnabled() ? { yawDebug: true as const } : {}) };
 }
 
 function uploadErrorToHttp(e: UploadError) {
@@ -130,11 +132,14 @@ function uploadErrorToHttp(e: UploadError) {
 /** Lỗi phía server đã phân loại — lượt đăng ký thẻ được hoàn (lỗi 500 không phân loại thì không). */
 const REFUNDABLE_CODES = new Set(["STORAGE_BUCKET_MISSING", "STORAGE_UNAVAILABLE", "OCR_UNAVAILABLE"]);
 
+type CardInput = { nonce: string; image: Buffer; frames: Buffer[]; clientYaw?: string };
+type CardResult = { status: "active" | "pending_review"; decodedCode: string; yawDebug?: YawDebugReport };
+
 export async function registerCard(
   session: SessionClaims,
-  input: { nonce: string; image: Buffer; frames: Buffer[] },
+  input: CardInput,
   ip: string | null,
-): Promise<{ status: "active" | "pending_review"; decodedCode: string }> {
+): Promise<CardResult> {
   const studentId = session.sub;
   await assertCanRegisterCard(studentId);
   const { challenge } = await consumeNonce({ nonce: input.nonce, studentId, purpose: "card", ip });
@@ -169,10 +174,10 @@ export async function registerCard(
 async function processCard(
   session: SessionClaims,
   studentId: string,
-  input: { nonce: string; image: Buffer; frames: Buffer[] },
+  input: CardInput,
   challenge: Challenge,
   timer: ReturnType<typeof stepTimer> & { decodeStats?: DecodeStats },
-): Promise<{ status: "active" | "pending_review"; decodedCode: string }> {
+): Promise<CardResult> {
   if (input.frames.length !== LIVE_FRAME_COUNT) {
     throw new HttpError(422, "VALIDATION_ERROR", "Cần đúng 3 khung hình khuôn mặt theo hướng dẫn.");
   }
@@ -208,14 +213,17 @@ async function processCard(
 
   // Liveness (FR-045a): 3 khung mặt trực tiếp đúng thử thách quay đầu và cùng một người. Sai → từ chối.
   const live = await Promise.all(frames.map((f) => deps.analyzeLive(f)));
-  const liveCheck = checkLiveFrames(
-    live.map((l) => l.faces.filter((f) => f.kps).map((f) => ({ box: f.box, kps: f.kps! }))),
-    challenge,
-  );
-  if (!liveCheck.ok) throw new HttpError(422, liveCheck.error, LIVE_MESSAGES[liveCheck.error]);
+  const liveFaces = live.map((l) => l.faces.filter((f) => f.kps).map((f) => ({ box: f.box, kps: f.kps! })));
+  // Preview/dev: yaw server từng khung + yaw client + lý do (công cụ hiệu chỉnh). Production: undefined, không log.
+  const debugOn = yawDebugEnabled();
+  const clientYaw = debugOn ? parseClientYaw(input.clientYaw) : null;
+  const debug = (reason: Parameters<typeof yawDebugReport>[3]) =>
+    debugOn ? { yawDebug: yawDebugReport(liveFaces, challenge, clientYaw, reason) } : {};
+  const liveCheck = checkLiveFrames(liveFaces, challenge);
+  if (!liveCheck.ok) throw new HttpError(422, liveCheck.error, LIVE_MESSAGES[liveCheck.error], {}, debug(liveCheck.error));
   const liveEmbeddings = await Promise.all(live.map((l) => l.embed(0)));
   if (!samePerson(liveEmbeddings, liveCheck.centerIndex, LIVENESS_RULES.samePersonMin)) {
-    throw new HttpError(422, "LIVENESS_FAILED", LIVE_MESSAGES.LIVENESS_FAILED);
+    throw new HttpError(422, "LIVENESS_FAILED", LIVE_MESSAGES.LIVENESS_FAILED, {}, debug("SAME_PERSON_FAILED"));
   }
 
   timer.mark("liveness");
@@ -286,7 +294,7 @@ async function processCard(
   }
   // Không trả lý do chờ duyệt cho SV (không lộ là mặt trùng với ai) — chỉ giảng viên xem (card/admin.ts).
   timer.mark("save");
-  return { status, decodedCode: decoded!.code };
+  return { status, decodedCode: decoded!.code, ...debug(null) };
 }
 
 /** Trạng thái thẻ của chính SV — không trả embedding, đường dẫn ảnh hay lý do nghi vấn. */

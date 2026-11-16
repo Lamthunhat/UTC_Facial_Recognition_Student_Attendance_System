@@ -8,6 +8,7 @@ import { json, route } from "../../http/handler";
  * POST /api/student/card — multipart {nonce, image} → 201 {status: 'active'|'pending_review', decodedCode}.
  *   Đồng ý điều khoản được kiểm TRƯỚC khi đọc body; nonce trước khi xử lý ảnh (FR-082).
  *   422 CODE_MISMATCH / UNREADABLE / NO_PORTRAIT / MULTIPLE_FACES / UNSUPPORTED_TYPE; 413 ảnh > 1 MB.
+ *   Preview/dev: nhận thêm `clientYaw`, trả `yawDebug` (so sánh yaw client ↔ server) — face/yaw-debug.ts; production không.
  */
 export const GET = route({ roles: ["student"] }, async ({ session }) => {
   await requireConsent(session!.sub);

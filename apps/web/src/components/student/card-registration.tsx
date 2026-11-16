@@ -6,6 +6,7 @@ import { AppLink, useAppNavigate } from "@/components/app-link";
 import { CardCapture } from "@/components/camera/CardCapture";
 import { FaceChallenge } from "@/components/camera/FaceChallenge";
 import { SubmitProgress } from "@/components/student/submit-progress";
+import { YawDebugTable } from "@/components/student/yaw-debug-table";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
@@ -14,11 +15,14 @@ import { cardFlow, initialCardFlow, type Notice } from "@/lib/student/card-flow"
 import { isChallenge } from "@/lib/student/challenge";
 import { loadFaceDetector } from "@/lib/student/face-detector";
 import { requestFits } from "@/lib/student/image";
+import { clientYawField, parseYawDebug, type YawDebugReport } from "@/lib/student/yaw-debug";
 
 /**
  * T063 — Đăng ký thẻ: (1) chụp thẻ → xem lại → (2) mặt trực tiếp theo thử thách → (3) gửi → kết quả.
  * Khung mặt chỉ tồn tại trong lúc tạo request; ảnh thẻ bỏ khi xong / làm lại từ đầu.
  * Kết quả không bao giờ kèm lý do chờ duyệt.
+ * Preview/dev (server báo `yawDebug: true` kèm nonce): gửi thêm yaw client từng khung, hiện bảng so sánh yaw client ↔ server
+ * từ phản hồi. Production: server không bật → không gửi, không hiện.
  */
 const HERE = "/sv/the-sinh-vien";
 
@@ -68,6 +72,9 @@ export function CardRegistration({ onFinished }: { onFinished: () => void }) {
   const [s, dispatch] = useReducer(cardFlow, initialCardFlow);
   const [nonceError, setNonceError] = useState<CardAdvice | null>(null);
   const [loadingNonce, setLoadingNonce] = useState(false);
+  /** Server bật công cụ so sánh yaw cho phiên chụp hiện tại (chỉ preview/dev). */
+  const yawDebugOn = useRef(false);
+  const [yawReport, setYawReport] = useState<YawDebugReport | null>(null);
 
   // Xem trước ảnh thẻ bằng blob: URL — thu hồi khi rời bước
   const previewUrl = useMemo(() => (s.step === "card-preview" ? URL.createObjectURL(s.card) : null), [s]);
@@ -88,8 +95,9 @@ export function CardRegistration({ onFinished }: { onFinished: () => void }) {
     setLoadingNonce(true);
     setNonceError(null);
     try {
-      const r = await api<{ nonce: string; expiresAt: string; challenge: unknown }>("/api/student/card/nonce", { method: "POST" });
+      const r = await api<{ nonce: string; expiresAt: string; challenge: unknown; yawDebug?: unknown }>("/api/student/card/nonce", { method: "POST" });
       if (!isChallenge(r.challenge)) throw new Error("BAD_CHALLENGE");
+      yawDebugOn.current = r.yawDebug === true;
       dispatch({ type: "NONCE_RECEIVED", nonce: r.nonce, challenge: r.challenge, expiresAt: Date.parse(r.expiresAt) });
     } catch (e) {
       const advice = adviceFrom(e);
@@ -103,17 +111,17 @@ export function CardRegistration({ onFinished }: { onFinished: () => void }) {
   // Khoá gửi: một lượt gửi tại một thời điểm (không gửi lại khi đang xử lý)
   const sending = useRef(false);
 
-  async function submit(frames: Blob[]) {
+  async function submit(frames: Blob[], yaws: (number | null)[]) {
     if (s.step !== "face" || sending.current) return;
     sending.current = true;
     try {
-      await send(frames);
+      await send(frames, yaws);
     } finally {
       sending.current = false;
     }
   }
 
-  async function send(frames: Blob[]) {
+  async function send(frames: Blob[], yaws: (number | null)[]) {
     if (s.step !== "face") return;
     const { card, nonce, expiresAt } = s;
     frames.forEach((frame) => dispatch({ type: "FRAME_CAPTURED", frame }));
@@ -128,11 +136,15 @@ export function CardRegistration({ onFinished }: { onFinished: () => void }) {
     form.append("nonce", nonce);
     form.append("image", card, "the-sinh-vien.jpg");
     frames.forEach((f, i) => form.append("frames", f, `khung-${i + 1}.jpg`));
+    if (yawDebugOn.current) form.append("clientYaw", clientYawField(yaws));
     frames.length = 0;
+    setYawReport(null);
     try {
-      const r = await api<{ status: "active" | "pending_review" }>("/api/student/card", { method: "POST", body: form });
+      const r = await api<{ status: "active" | "pending_review"; yawDebug?: unknown }>("/api/student/card", { method: "POST", body: form });
+      setYawReport(parseYawDebug(r.yawDebug));
       dispatch({ type: "SUBMIT_OK", status: r.status });
     } catch (e) {
+      if (e instanceof ApiError) setYawReport(parseYawDebug(e.details.yawDebug));
       const advice = adviceFrom(e);
       dispatch({ type: "SUBMIT_FAILED", advice });
       follow(advice);
@@ -173,6 +185,7 @@ export function CardRegistration({ onFinished }: { onFinished: () => void }) {
           <Stepper current={2} />
           <NoticeBox notice={s.notice} />
           {nonceError && <NoticeBox notice={nonceError} />}
+          {yawReport && <YawDebugTable report={yawReport} />}
           <div className="rounded-lg border border-border p-4 text-sm">
             <p className="font-semibold">Chụp khuôn mặt trực tiếp</p>
             <p className="mt-1 text-muted-foreground">
@@ -192,7 +205,7 @@ export function CardRegistration({ onFinished }: { onFinished: () => void }) {
       return (
         <div className="flex flex-col gap-4">
           <Stepper current={2} />
-          <FaceChallenge key={s.nonce} challenge={s.challenge} onComplete={(frames) => void submit(frames)} />
+          <FaceChallenge key={s.nonce} challenge={s.challenge} onComplete={(frames, yaws) => void submit(frames, yaws)} />
         </div>
       );
     case "submitting":
@@ -202,8 +215,8 @@ export function CardRegistration({ onFinished }: { onFinished: () => void }) {
           <SubmitProgress />
         </div>
       );
-    case "done":
-      return s.status === "active" ? (
+    case "done": {
+      const result = s.status === "active" ? (
         <div className="flex flex-col items-center gap-3 rounded-lg border border-green-200 bg-green-50 p-6 text-center" role="status">
           <CheckCircle2 className="size-10 text-green-700" aria-hidden />
           <p className="font-semibold text-green-800">Đăng ký thẻ thành công</p>
@@ -222,6 +235,13 @@ export function CardRegistration({ onFinished }: { onFinished: () => void }) {
           </AppLink>
         </div>
       );
+      return (
+        <div className="flex flex-col gap-4">
+          {result}
+          {yawReport && <YawDebugTable report={yawReport} />}
+        </div>
+      );
+    }
     case "blocked":
       return (
         <div className="flex flex-col gap-4">

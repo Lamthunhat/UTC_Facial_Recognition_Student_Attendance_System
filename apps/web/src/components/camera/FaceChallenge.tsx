@@ -21,6 +21,8 @@ import { useCamera } from "./use-camera";
  * - Model không tải được → đếm ngược 3 giây mỗi khung như trước.
  * Client chỉ HƯỚNG DẪN — server vẫn quyết định liveness. Xem trước lật như gương; ảnh chụp lấy từ luồng gốc (không lật).
  * Khung ~720p, nén ≤ 0,9 MB. Camera tắt ngay sau khung cuối; khung chỉ được trao cho onComplete (không lưu lại).
+ * onComplete nhận kèm yaw client lúc chụp từng khung (null nếu không đo được) — chỉ gửi lên khi server bật công cụ
+ * so sánh yaw (preview/dev).
  */
 const COUNTDOWN = 3;
 const DETECT_EVERY_MS = 80;
@@ -29,7 +31,13 @@ const MODEL_LOAD_TIMEOUT_MS = 15_000;
 
 type Run = { index: number; count: number | null; flash: boolean; guide: string | null; hold: boolean; notice: string | null };
 
-export function FaceChallenge({ challenge, onComplete }: { challenge: Challenge; onComplete: (frames: Blob[]) => void }) {
+export function FaceChallenge({
+  challenge,
+  onComplete,
+}: {
+  challenge: Challenge;
+  onComplete: (frames: Blob[], yaws: (number | null)[]) => void;
+}) {
   const { videoRef, state, start, stop } = useCamera("user", { width: 1280, height: 720 });
   const steps = poseSteps(challenge);
   const [run, setRun] = useState<Run | null>(null);
@@ -40,6 +48,8 @@ export function FaceChallenge({ challenge, onComplete }: { challenge: Challenge;
   const cancelled = useRef(false);
   const raf = useRef<number | null>(null);
   const fallbackNow = useRef(false);
+  /** Yaw client tại thời điểm chụp khung hiện tại. */
+  const shotYaw = useRef<number | null>(null);
 
   useEffect(() => {
     cancelled.current = false;
@@ -65,7 +75,10 @@ export function FaceChallenge({ challenge, onComplete }: { challenge: Challenge;
       setRun({ index: i, count: c, flash: false, guide: null, hold: false, notice: null });
       await wait(1000);
     }
-    return cancelled.current ? null : captureVideo(video, FACE_FRAME);
+    if (cancelled.current) return null;
+    const fd = detector.current;
+    shotYaw.current = fd ? detectPose(fd, video, performance.now()).yaw : null;
+    return captureVideo(video, FACE_FRAME);
   }
 
   /** Tự chụp theo hướng dẫn; trả "countdown" nếu SV chọn chụp theo đếm ngược cho khung này. */
@@ -84,6 +97,7 @@ export function FaceChallenge({ challenge, onComplete }: { challenge: Challenge;
           const { faces, yaw } = detectPose(fd, video, now);
           const r = tracker.feed(now, faces, yaw);
           if (r.status === "capture") {
+            shotYaw.current = yaw;
             captureVideo(video, FACE_FRAME).then(resolve, reject);
             return;
           }
@@ -105,20 +119,23 @@ export function FaceChallenge({ challenge, onComplete }: { challenge: Challenge;
     setError(null);
     setCanFallback(false);
     const frames: Blob[] = [];
+    const yaws: (number | null)[] = [];
     try {
       for (let i = 0; i < steps.length; i++) {
+        shotYaw.current = null;
         const fd = detector.current;
         let shot: Blob | "countdown" | null = fd ? await guidedStep(video, fd, i) : await countdownStep(video, i);
         if (shot === "countdown") shot = await countdownStep(video, i);
         if (!shot || cancelled.current) return;
         frames.push(shot);
+        yaws.push(shotYaw.current);
         setCanFallback(false);
         setRun({ index: i, count: null, flash: true, guide: null, hold: false, notice: null });
         await wait(350);
       }
       stop();
       setRun(null);
-      onComplete(frames.splice(0)); // trao khung đi, không giữ lại bản nào trong component
+      onComplete(frames.splice(0), yaws); // trao khung đi, không giữ lại bản nào trong component
     } catch {
       frames.length = 0;
       setRun(null);

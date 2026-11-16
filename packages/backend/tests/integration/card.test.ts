@@ -2,7 +2,7 @@ import { useTestAppDb } from "@utc/database/testing";
 import { CONSENT_VERSION } from "@utc/shared/consent";
 import { vnDateOf, vnDateTime } from "@utc/shared/periods";
 import sharp from "sharp";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET as staffGetCard } from "../../src/api/admin/student-card";
 import { POST as staffResetCard } from "../../src/api/admin/student-card-reset";
 import { POST as staffReviewCard } from "../../src/api/admin/student-card-review";
@@ -205,6 +205,7 @@ beforeAll(async () => {
   await sv("N", "231230810", "Đỗ Hữu", "Khánh", []); // không thuộc lớp nào
   await sv("L", "231230811", "Lê Văn", "Lâm", ["K1"]); // ca liveness
   await sv("P", "231230812", "Phan Thị", "Phương", ["K1"]); // ca thẻ bị từ chối không lưu gì
+  await sv("Y", "231230813", "Vũ Thị", "Yến", ["K1"]); // công cụ so sánh yaw (preview/dev)
   for (const [who, seed] of [["B", 2], ["D", 4]] as const) {
     await q(
       `insert into student_cards (student_id, embedding, decoded_code, decode_method, status) values ($1, $2::vector, $3, 'barcode', 'active')`,
@@ -794,5 +795,107 @@ describe("GET /api/student/classes — lớp của SV (T062)", () => {
     expect(res.status).toBe(200);
     const { classes } = await readJson(res);
     expect(classes).toEqual([{ classId: ids.K1, code: "K1", courseName: "HP", room: null, openWindow: null }]);
+  });
+});
+
+describe("công cụ so sánh yaw client ↔ server — CHỈ preview/dev; production không trả", () => {
+  beforeAll(async () => {
+    await consent("Y");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+  const setEnv = (vercelEnv: "preview" | "production") => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", vercelEnv);
+  };
+  async function nonceBody(who: string) {
+    const body = await readJson(await cardNonce(json("/api/student/card/nonce", cookie[who]), NO_PARAMS));
+    lastChallenge = body.challenge;
+    return body;
+  }
+  async function submitYaw(who: string, clientYaw: string) {
+    liveFrameNo = 0;
+    const { nonce } = await nonceBody(who);
+    return uploadCard(await multipart(cookie[who], { nonce, image: await photo(), frames: selfies, clientYaw }), NO_PARAMS);
+  }
+  const resetY = () => q(`update student_cards set status='replaced' where student_id=$1`, [ids.Y]);
+
+  it("production: nonce không có yawDebug; lỗi liveness và 201 không kèm yawDebug dù client gửi clientYaw", async () => {
+    setEnv("production");
+    expect(await nonceBody("Y")).not.toHaveProperty("yawDebug");
+    scenario("231230813", 31);
+    liveMode = "reverse";
+    const bad = await readJson(await submitYaw("Y", "[0.5,0,-0.5]"));
+    expect(bad.error.code).toBe("LIVENESS_FAILED");
+    expect(bad.error).not.toHaveProperty("yawDebug");
+    scenario("231230813", 31);
+    const ok = await submitYaw("Y", "[0.5,0,-0.5]");
+    expect(ok.status).toBe(201);
+    expect(await readJson(ok)).toEqual({ status: "active", decodedCode: "231230813" });
+    await resetY();
+  });
+
+  it("preview: nonce báo yawDebug=true; quay ngược → 422 kèm yaw server từng khung, yaw client, lý do; vẫn có remainingAttempts", async () => {
+    setEnv("preview");
+    expect((await nonceBody("Y")).yawDebug).toBe(true);
+    await q(`delete from rate_limits`);
+    scenario("231230813", 31);
+    liveMode = "reverse";
+    const res = await submitYaw("Y", "[0.5,0.01,-0.5]");
+    expect(res.status).toBe(422);
+    const { error } = await readJson(res);
+    expect(error.code).toBe("LIVENESS_FAILED");
+    expect(error.remainingAttempts).toBe(5);
+    const d = error.yawDebug;
+    expect(d.reason).toBe("LIVENESS_FAILED");
+    expect(d.frames).toHaveLength(3);
+    expect(d.frames.map((f: { clientYaw: number }) => f.clientYaw)).toEqual([0.5, 0.01, -0.5]);
+    expect(d.frames.map((f: { expected: string }) => f.expected)).toEqual([lastChallenge[0], "center", lastChallenge[1]]);
+    expect(d.frames.map((f: { ok: boolean }) => f.ok)).toEqual([false, true, false]);
+    expect(d.frames.every((f: { serverYaw: unknown }) => typeof f.serverYaw === "number")).toBe(true);
+    expect(d.thresholds.server).toEqual({ centerMax: 0.18, turnMin: 0.3, turnMax: 0.8 });
+    expect(uploads).toHaveLength(0);
+  });
+
+  it("preview: 3 khung không cùng người → SV vẫn thấy LIVENESS_FAILED, yawDebug.reason = SAME_PERSON_FAILED (tư thế đều ok)", async () => {
+    setEnv("preview");
+    scenario("231230813", 31);
+    let n = 0;
+    const realLive = fakeDeps.analyzeLive;
+    fakeDeps.analyzeLive = async (img) => {
+      const r = await realLive(img);
+      const k = n++;
+      return { ...r, embed: async () => (k === 2 ? faceVector(98) : nextEmbedding) };
+    };
+    try {
+      const { error } = await readJson(await submitYaw("Y", "junk"));
+      expect(error.code).toBe("LIVENESS_FAILED");
+      expect(error.yawDebug.reason).toBe("SAME_PERSON_FAILED");
+      expect(error.yawDebug.frames.every((f: { ok: boolean; clientYaw: unknown }) => f.ok && f.clientYaw === null)).toBe(true);
+    } finally {
+      fakeDeps.analyzeLive = realLive;
+    }
+  });
+
+  it("preview: thẻ bị từ chối trước bước liveness → không có yawDebug (khung chưa được phân tích)", async () => {
+    setEnv("preview");
+    scenario("231239999", 31); // CODE_MISMATCH
+    const { error } = await readJson(await submitYaw("Y", "[0.5,0,-0.5]"));
+    expect(error.code).toBe("CODE_MISMATCH");
+    expect(error).not.toHaveProperty("yawDebug");
+  });
+
+  it("preview: đúng thử thách → 201 kèm yawDebug (reason null, 3 khung ok)", async () => {
+    setEnv("preview");
+    scenario("231230813", 31);
+    const res = await submitYaw("Y", "[0.45,-0.03,-0.44]");
+    expect(res.status).toBe(201);
+    const body = await readJson(res);
+    expect(body.status).toBe("active");
+    expect(body.yawDebug.reason).toBeNull();
+    expect(body.yawDebug.frames.map((f: { ok: boolean }) => f.ok)).toEqual([true, true, true]);
+    expect(body.yawDebug.frames.map((f: { clientYaw: number }) => f.clientYaw)).toEqual([0.45, -0.03, -0.44]);
+    await resetY();
   });
 });
